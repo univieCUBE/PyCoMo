@@ -3,6 +3,7 @@ This module contains some utility function related to cobrapy community models.
 """
 import pandas as pd
 import cobra
+import libsbml
 import os
 import re
 
@@ -184,3 +185,23 @@ def check_mass_balance_of_metabolites_with_identical_id(model_1, model_2):
             unbalanced_metabolites.append(met_id)
 
     return unbalanced_metabolites
+
+
+def create_parameter_in_sbml_model(sbml_model, pid, is_constant, value=None):
+    """
+    Helper function to set a parameter with ID and value to a SBML model.
+    """
+    parameter = sbml_model.createParameter()
+    parameter.setId(pid)
+    if not value is None:
+        parameter.setValue(value)
+    parameter.setConstant(is_constant)
+
+
+def create_abundance_parameter(sbml_model, member_id, abundance=None):
+    parameter_prefix = "Abundance_"
+    create_parameter_in_sbml_model(sbml_model=sbml_model, pid=parameter_prefix+member_id, is_constant=False, value=abundance)
+
+def read_sbml_model_from_file(file_path):
+    sbml_doc = cobra.io.sbml._get_doc_from_filename(file_path)
+    return sbml_doc.getModel()

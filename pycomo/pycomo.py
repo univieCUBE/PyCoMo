@@ -10,6 +10,7 @@ by metainformation required for community model generation. The community model 
 import cobra
 import numpy as np
 import pandas as pd
+import libsbml
 import os
 from typing import List
 from utils import *
@@ -351,6 +352,7 @@ class CommunityModel:
     _community_model: cobra.Model = None
     _medium: dict = None
     _merge_via_annotation: str = None
+    _abundance_dict: dict = None
 
     def __init__(self, models, name, merge_via_annotation=None):
         self.models = models
@@ -534,6 +536,7 @@ class CommunityModel:
 
         self._community_model = abd_model
         self.abundance_flag = True
+        self._abundance_dict = abd_dict
         if self.medium_flag:
             self.apply_medium()
         return abd_model
@@ -717,6 +720,30 @@ class CommunityModel:
         exchange_fva_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=0.,
                                                                   composition_agnostic=True)
         return self.format_exchg_rxns(exchange_fva_df)
+
+    def save(self, file_path):
+        """
+        Save the community model object as a SBML file. This also includes the names of the community members and their abundance (if set).
+        """
+        # Generate a libsbml.model object
+        cobra.io.write_sbml_model(self.community_model, filename=file_path)
+        sbml_doc = cobra.io.sbml._get_doc_from_filename(file_path)
+        sbml_model = sbml_doc.getModel()
+
+        # Add parameters for the community members and their abundance
+        abundances = {}
+        if self._abundance_dict is None:
+            for organism in self.get_organism_names():
+                abundances[organism] = None
+        else:
+            abundances = self._abundance_dict
+
+        for member, fraction in abundances.items():
+            create_abundance_parameter(sbml_model=sbml_model, member_id=member, abundance=fraction)
+
+        libsbml.writeSBMLToFile(sbml_doc, file_path)
+
+        return
 
 
 
