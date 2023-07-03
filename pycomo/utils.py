@@ -150,3 +150,37 @@ def list_without_element(list_var, element):
     list_var = list_var.copy()
     list_var.remove(element)
     return list_var
+
+
+def check_metabolite_equal_mass(met1, met2):
+    """
+    This function compares mass and charge of two metabolites. It returns True if the metabolites have equal mass and
+    charge and False if they do not.
+    """
+    test_reaction = cobra.Reaction()
+    test_reaction.add_metabolites({met1: -1., met2: 1.})
+    return not bool(test_reaction.check_mass_balance())
+
+
+def get_exchange_metabolites(model):
+    exchange_metabolites = {}
+    for reaction in model.exchanges:
+        if len(reaction.metabolites) != 1:
+            print(f"Error: exchange reaction {reaction.id} has more than 1 metabolite")
+        exchange_met = list(reaction.metabolites.keys())[0]
+        exchange_metabolites[exchange_met.id] = exchange_met
+    return exchange_metabolites
+
+
+def check_mass_balance_of_metabolites_with_identical_id(model_1, model_2):
+    exchg_mets_1 = get_exchange_metabolites(model_1)
+    exchg_mets_2 = get_exchange_metabolites(model_2)
+
+    unbalanced_metabolites = []
+
+    for met_id in set(exchg_mets_1) & set(exchg_mets_2):
+        equal_mass = check_metabolite_equal_mass(exchg_mets_1[met_id], exchg_mets_2[met_id])
+        if not equal_mass:
+            unbalanced_metabolites.append(met_id)
+
+    return unbalanced_metabolites

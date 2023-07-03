@@ -280,7 +280,7 @@ class SingleOrganismModel:
         if add_missing_transports:
             mets_without_exchg = self.find_metabolites_without_exchange_rxn(model)
             self.add_exchange_reactions_to_metabolites(model, mets_without_exchg, inplace=True)
-        self.convert_exchange_to_transport_reaction(model, old_exc_comp, exchg_comp_name, inplace=True)
+        self.convert_exchange_to_transport_reaction(model, old_exc_comp, inplace=True)
         # Add exchange reactions
         self.add_exchange_reactions_to_compartment(model, exchg_comp_name, inplace=True)
 
@@ -423,6 +423,12 @@ class CommunityModel:
     def get_member_names(self):
         return [member.name for member in self.models]
 
+    def get_unbalanced_reactions(self):
+        return cobra.manipulation.validate.check_mass_balance(self.community_model)
+
+    def is_mass_balanced(self):
+        return not bool(self.get_unbalanced_reactions())
+
     def generate_community_model(self):
         merged_model = None
         biomass_mets = []
@@ -435,6 +441,9 @@ class CommunityModel:
                 biomass_mets.append(merged_model.metabolites.get_by_id(biomass_met_id))
             else:
                 extended_model = model.prepare_for_merging()
+                unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model, merged_model)
+                for met_id in unbalanced_metabolites:
+                    print(f"WARNING: matching of the metabolite {met_id} is unbalanced (mass and/or charge). Please manually curate this metabolite for a mass and charge balanced model!")
                 merged_model.merge(extended_model)
                 biomass_met_id = model.biomass_met.id
                 biomass_mets.append(merged_model.metabolites.get_by_id(biomass_met_id))
@@ -465,6 +474,10 @@ class CommunityModel:
         merged_model.id = self.name
 
         self._unconstrained_model = merged_model
+
+        if not self.is_mass_balanced():
+            print("WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
+
         return merged_model
 
     def get_organism_names(self):
