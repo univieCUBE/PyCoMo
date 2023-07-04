@@ -133,6 +133,14 @@ def make_model_ids_sbml_conform(model):
     return model
 
 
+def get_metabolite_id_without_compartment(metabolite):
+    compartment_string = "_" + metabolite.compartment
+    if metabolite.id[-len(compartment_string):] == compartment_string:
+        return metabolite.id[:-len(compartment_string)]
+    else:
+        return metabolite.id
+
+
 def list_contains_unique_strings(str_list):
     return len(str_list) == len(list(set(str_list)))
 
@@ -228,5 +236,25 @@ def get_abundance_parameters_from_sbml_file(sbml_file):
     return get_abundance_parameters_from_sbml_doc(sbml_model)
 
 
-def find_shared_annotations(met1, met2):
-    pass
+def find_matching_annotations(met1, met2):
+    shared_annotation_keys = set(met1.annotation) & set(met2.annotation)
+    matching_annotations = {}
+    for key in shared_annotation_keys:
+        if met1.annotation[key] == met2.annotation[key]:
+            matching_annotations[key] = met1.annotation[key]
+
+    return matching_annotations
+
+
+def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
+    exchg_mets_1 = get_exchange_metabolites(model_1)
+    exchg_mets_2 = get_exchange_metabolites(model_2)
+
+    metabolites_without_overlap = []
+
+    for met_id in set(exchg_mets_1) & set(exchg_mets_2):
+        matching_annotations = find_matching_annotations(exchg_mets_1[met_id], exchg_mets_2[met_id])
+        if not matching_annotations:
+            metabolites_without_overlap.append(met_id)
+
+    return metabolites_without_overlap

@@ -466,7 +466,16 @@ class CommunityModel:
                 extended_model = model.prepare_for_merging()
                 unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model, merged_model)
                 for met_id in unbalanced_metabolites:
-                    print(f"WARNING: matching of the metabolite {met_id} is unbalanced (mass and/or charge). Please manually curate this metabolite for a mass and charge balanced model!")
+                    met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
+                    print(f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
+                          f"Please manually curate this metabolite for a mass and charge balanced model!")
+                no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
+                                                                                             merged_model)
+                for met_id in no_annotation_overlap:
+                    met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
+                    print(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
+                          f"Please make sure that the metabolite with this ID is indeed representing the same substance"
+                          f" in all models!")
                 merged_model.merge(extended_model)
                 biomass_met_id = model.biomass_met.id
                 biomass_mets.append(merged_model.metabolites.get_by_id(biomass_met_id))
