@@ -193,7 +193,7 @@ def create_parameter_in_sbml_model(sbml_model, pid, is_constant, value=None):
     """
     parameter = sbml_model.createParameter()
     parameter.setId(pid)
-    if not value is None:
+    if value is not None:
         parameter.setValue(value)
     parameter.setConstant(is_constant)
 
@@ -202,6 +202,31 @@ def create_abundance_parameter(sbml_model, member_id, abundance=None):
     parameter_prefix = "Abundance_"
     create_parameter_in_sbml_model(sbml_model=sbml_model, pid=parameter_prefix+member_id, is_constant=False, value=abundance)
 
+
 def read_sbml_model_from_file(file_path):
     sbml_doc = cobra.io.sbml._get_doc_from_filename(file_path)
     return sbml_doc.getModel()
+
+
+def get_abundance_parameters_from_sbml_doc(sbml_model):
+    parameter_prefix = "Abundance_"
+    abundance_dict = {}
+
+    for parameter in sbml_model.getListOfParameters():
+        parameter_id = parameter.getId()
+        if parameter_prefix in parameter_id[:len(parameter_prefix)]:
+            fraction = None
+            if parameter.isSetValue():
+                fraction = parameter.getValue()
+            abundance_dict[parameter_id[len(parameter_prefix):]] = fraction
+
+    return abundance_dict
+
+
+def get_abundance_parameters_from_sbml_file(sbml_file):
+    sbml_model = read_sbml_model_from_file(sbml_file)
+    return get_abundance_parameters_from_sbml_doc(sbml_model)
+
+
+def find_shared_annotations(met1, met2):
+    pass

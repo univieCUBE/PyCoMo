@@ -353,14 +353,25 @@ class CommunityModel:
     _medium: dict = None
     _merge_via_annotation: str = None
     _abundance_dict: dict = None
+    _member_names = None
 
-    def __init__(self, models, name, merge_via_annotation=None):
+    def __init__(self, models=None, name="", merge_via_annotation=None, **kwargs):
         self.models = models
-        model_names = [model.name for model in self.models]
+
+        if models is not None:
+            model_names = [model.name for model in self.models]
+        elif "member_names" in kwargs.keys():  # Construction from saved file
+            model_names = kwargs["member_names"]
+        else:
+            raise AssertionError("No models provided to CommunityModel object!")
+
         if not list_contains_unique_strings(model_names):
             raise AssertionError(f"Model names contain duplicates!")
         if list_of_strings_is_self_contained(model_names):
             raise AssertionError(f"Some model names are contained in others!")
+
+        self._member_names = model_names
+
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
             print(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
@@ -368,6 +379,12 @@ class CommunityModel:
             self._merge_via_annotation = merge_via_annotation
             for model in self.models:
                 model.set_name_via_annotation(merge_via_annotation)
+
+        if "unconstrained_model" in kwargs.keys():
+            self._unconstrained_model = kwargs["unconstrained_model"]
+
+        if "abundance_profile" in kwargs.keys():
+            self.apply_abundance(kwargs["abundance_profile"])
 
     @property
     def unconstrained_model(self):
@@ -423,7 +440,11 @@ class CommunityModel:
         return conversion_dict
 
     def get_member_names(self):
-        return [member.name for member in self.models]
+        if self.models is not None:
+            member_names = [member.name for member in self.models]
+        else:
+            member_names = self._member_names
+        return member_names
 
     def get_unbalanced_reactions(self):
         return cobra.manipulation.validate.check_mass_balance(self.community_model)
@@ -482,17 +503,14 @@ class CommunityModel:
 
         return merged_model
 
-    def get_organism_names(self):
-        return [model.name for model in self.models]
-
     def apply_abundance(self, abd_dict):
         # Check if organism names are in the model
         try:
-            assert all([name in self.get_organism_names() for name in abd_dict.keys()])
+            assert all([name in self.get_member_names() for name in abd_dict.keys()])
         except AssertionError:
             print(f"Error: Some names in the abundances are not part of the model.")
             print(f"\tAbundances: {abd_dict.keys()}")
-            print(f"\tOrganisms in model: {self.get_organism_names()}")
+            print(f"\tOrganisms in model: {self.get_member_names()}")
             raise AssertionError
 
         # Check that abundances sum to 1
@@ -510,14 +528,14 @@ class CommunityModel:
             assert np.isclose([sum(abd_dict.values())], [1.])
 
         # Extend abundances to include all organisms of model
-        for name in self.get_organism_names():
+        for name in self.get_member_names():
             if name not in abd_dict.keys():
                 abd_dict[name] = 0.
 
         # Apply abundances to model
         abd_model = self.unconstrained_model.copy()
         for rxn in abd_model.reactions:
-            for name in self.get_organism_names():
+            for name in self.get_member_names():
                 if rxn.id.find(name) == 0:
                     rxn.lower_bound *= float(abd_dict[name])
                     rxn.upper_bound *= float(abd_dict[name])
@@ -529,7 +547,7 @@ class CommunityModel:
             if value > 0:
                 continue
             else:
-                for name in self.get_organism_names():
+                for name in self.get_member_names():
                     if met.id.find(name) == 0:
                         stoichiometry[met] = -float(abd_dict[name])
         biomass_rxn.add_metabolites(stoichiometry, combine=False)
@@ -543,7 +561,7 @@ class CommunityModel:
 
     def equal_abundance(self):
         abundances = {}
-        names = self.get_organism_names()
+        names = self.get_member_names()
         for name in names:
             abundances[name] = 1. / len(names)
         return self.apply_abundance(abundances)
@@ -726,14 +744,14 @@ class CommunityModel:
         Save the community model object as a SBML file. This also includes the names of the community members and their abundance (if set).
         """
         # Generate a libsbml.model object
-        cobra.io.write_sbml_model(self.community_model, filename=file_path)
+        cobra.io.write_sbml_model(self._unconstrained_model, filename=file_path)
         sbml_doc = cobra.io.sbml._get_doc_from_filename(file_path)
         sbml_model = sbml_doc.getModel()
 
         # Add parameters for the community members and their abundance
         abundances = {}
         if self._abundance_dict is None:
-            for organism in self.get_organism_names():
+            for organism in self.get_member_names():
                 abundances[organism] = None
         else:
             abundances = self._abundance_dict
@@ -744,6 +762,20 @@ class CommunityModel:
         libsbml.writeSBMLToFile(sbml_doc, file_path)
 
         return
+
+    @classmethod
+    def load(cls, file_path):
+
+        abundance_parameters = get_abundance_parameters_from_sbml_file(file_path)
+        assert len(abundance_parameters) > 0
+
+        constructor_args = {}
+        constructor_args["member_names"] = list(abundance_parameters.keys())
+        if any([val is not None for val in abundance_parameters.values()]):
+            constructor_args["abundance_profile"] = abundance_parameters
+        constructor_args["unconstrained_model"] = cobra.io.read_sbml_model(file_path)
+        name = constructor_args["unconstrained_model"].id
+        return cls(name=name, **constructor_args)
 
 
 
