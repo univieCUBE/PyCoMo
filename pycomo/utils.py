@@ -258,3 +258,4 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
             metabolites_without_overlap.append(met_id)
 
     return metabolites_without_overlap
+    return metabolites_without_overlap

@@ -616,7 +616,7 @@ class CommunityModel:
 
         if len(file_path) > 0:
             print(f"Saving flux vector to {file_path}")
-            solution_df.to_csv(file_path, sep="\t", header=True, index=False)
+            solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
     def run_fva(self, unconstrained=False, fraction_of_optimum=0.9, composition_agnostic=False):
@@ -650,7 +650,7 @@ class CommunityModel:
 
         if len(file_path) > 0:
             print(f"Saving flux vector to {file_path}")
-            solution_df.to_csv(file_path, sep="\t", header=True, index=False)
+            solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
     def cross_feeding_metabolites_from_fba(self, unconstrained=False):
