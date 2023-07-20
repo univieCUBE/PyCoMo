@@ -14,10 +14,10 @@ def make_string_sbml_id_compatible(string, remove_ascii_escapes=False, remove_tr
     :param string:
     :return:
     """
+    alphanum_pattern = re.compile(r'\w')
+
     for idx, character in enumerate(string):
-        if character.isalpha() or character.isnumeric() or character == "_":
-            continue
-        else:
+        if not alphanum_pattern.match(character):
             string = string[:idx] + "_" + string[idx+1:]
 
     if remove_ascii_escapes:
@@ -26,6 +26,9 @@ def make_string_sbml_id_compatible(string, remove_ascii_escapes=False, remove_tr
     if remove_trailing_underscore:
         while string and string[-1] == "_":
             string = string[:-1]
+
+    if string[0].isdigit():
+        string = "_" + string
 
     return string
 
@@ -124,12 +127,22 @@ def get_model_biomass_compound(model, expected_biomass_id="", generate_if_none=F
 
 def make_model_ids_sbml_conform(model):
     for met in model.metabolites:
+        if not met.name:
+            met.name = met.id
         met.id = make_string_sbml_id_compatible(met.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
         met.compartment = make_string_sbml_id_compatible(met.compartment, remove_ascii_escapes=True, remove_trailing_underscore=True)
     for rxn in model.reactions:
+        if not rxn.name:
+            rxn.name = rxn.id
         rxn.id = make_string_sbml_id_compatible(rxn.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
     for group in model.groups:
+        if not group.name:
+            group.name = group.id
         group.id = make_string_sbml_id_compatible(group.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+    for gene in model.genes:
+        if not gene.name:
+            gene.name = gene.id
+        gene.id = make_string_sbml_id_compatible(gene.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
     return model
 
 

@@ -311,6 +311,19 @@ class SingleOrganismModel:
 
         return model
 
+    def prefix_gene_names(self, model, prefix, inplace=True):
+        if not inplace:
+            model = model.copy()  # Don't want to change the original
+
+        for gene in model.genes:
+            if not gene.name:
+                gene.name = gene.id
+            gene.id = f"{prefix}{gene.id}"
+
+        model.repair()
+
+        return model
+
     def remove_biomass_exchange_rxn(self, model, remove_all_consuming_rxns=True):
         for reaction in self.biomass_met.reactions:
             if reaction in model.exchanges:
@@ -337,6 +350,7 @@ class SingleOrganismModel:
         self.add_exchange_compartment(self.prepared_model, add_missing_transports=True)
         self.prefix_metabolite_names(self.prepared_model, self.name + "_", exclude_compartment="exchg")
         self.prefix_reaction_names(self.prepared_model, self.name + "_", exclude_compartment="exchg")
+        self.prefix_gene_names(self.prepared_model, self.name + "_")
         return self.prepared_model
 
 
@@ -619,7 +633,7 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def run_fva(self, unconstrained=False, fraction_of_optimum=0.9, composition_agnostic=False):
+    def run_fva(self, unconstrained=False, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False):
         if unconstrained:
             model = self.unconstrained_model
         else:
@@ -635,10 +649,10 @@ class CommunityModel:
                     if reaction.upper_bound < 0.:
                         reaction.upper_bound = 0.
                 solution_df = cobra.flux_analysis.flux_variability_analysis(composition_agnostic_model, reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum)
+                                                                            fraction_of_optimum=fraction_of_optimum, loopless=loopless)
         else:
             solution_df = cobra.flux_analysis.flux_variability_analysis(model, reactions,
-                                                                        fraction_of_optimum=fraction_of_optimum)
+                                                                        fraction_of_optimum=fraction_of_optimum, loopless=loopless)
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
