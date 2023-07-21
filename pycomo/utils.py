@@ -139,10 +139,18 @@ def make_model_ids_sbml_conform(model):
         if not group.name:
             group.name = group.id
         group.id = make_string_sbml_id_compatible(group.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+
+    rename_dict = {}
     for gene in model.genes:
         if not gene.name:
             gene.name = gene.id
-        gene.id = make_string_sbml_id_compatible(gene.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+        rename_dict[gene.id] = make_string_sbml_id_compatible(gene.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+
+    if rename_dict:
+        cobra.manipulation.modify.rename_genes(model, rename_dict)
+
+    model.repair()
+
     return model
 
 
@@ -270,5 +278,4 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
         if not matching_annotations:
             metabolites_without_overlap.append(met_id)
 
-    return metabolites_without_overlap
     return metabolites_without_overlap

@@ -293,7 +293,8 @@ class SingleOrganismModel:
 
         for metabolite in model.metabolites:
             if not metabolite.compartment == exclude_compartment:
-                metabolite.id = f"{prefix}{metabolite.id}"
+                if prefix != metabolite.id[:len(prefix)]:
+                    metabolite.id = f"{prefix}{metabolite.id}"
 
         model.repair()
 
@@ -305,7 +306,8 @@ class SingleOrganismModel:
 
         for reaction in model.reactions:
             if len(exclude_compartment) > 0 and reaction.id[-len(exclude_compartment):] != exclude_compartment:
-                reaction.id = f"{prefix}{reaction.id}"
+                if prefix != reaction.id[:len(prefix)]:
+                    reaction.id = f"{prefix}{reaction.id}"
 
         model.repair()
 
@@ -315,10 +317,15 @@ class SingleOrganismModel:
         if not inplace:
             model = model.copy()  # Don't want to change the original
 
+        rename_dict = {}
         for gene in model.genes:
             if not gene.name:
                 gene.name = gene.id
-            gene.id = f"{prefix}{gene.id}"
+            if prefix != gene.id[:len(prefix)]:
+                rename_dict[gene.id] = f"{prefix}{gene.id}"
+
+        if rename_dict:
+            cobra.manipulation.modify.rename_genes(model, rename_dict)
 
         model.repair()
 
