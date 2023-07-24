@@ -473,6 +473,15 @@ class CommunityModel:
     def is_mass_balanced(self):
         return not bool(self.get_unbalanced_reactions())
 
+    def get_loops(self):
+        """This is a function to find closed loops that can sustain flux without any input or output. Such loops are thermodynamically infeasible and biologically non-sensical. Users should be aware of their presence and either remove them or check any model solutions for the presence of these cycles."""
+        no_medium = {}
+        with self.community_model as no_medium_model:
+            no_medium_model.medium = no_medium
+            solution_df = self._run_fva_with_no_medium(fraction_of_optimum=0., composition_agnostic=True,
+                                                       loopless=False)
+        return solution_df[(~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
+
     def generate_community_model(self):
         merged_model = None
         biomass_mets = []
@@ -485,13 +494,14 @@ class CommunityModel:
                 biomass_mets.append(merged_model.metabolites.get_by_id(biomass_met_id))
             else:
                 extended_model = model.prepare_for_merging()
-                unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model, merged_model)
+                unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model,
+                                                                                             merged_model)
                 for met_id in unbalanced_metabolites:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
                     print(f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
                           f"Please manually curate this metabolite for a mass and charge balanced model!")
                 no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
-                                                                                             merged_model)
+                                                                                                  merged_model)
                 for met_id in no_annotation_overlap:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
                     print(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
@@ -529,7 +539,8 @@ class CommunityModel:
         self._unconstrained_model = merged_model
 
         if not self.is_mass_balanced():
-            print("WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
+            print(
+                "WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
 
         return merged_model
 
@@ -640,6 +651,36 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
+    def _run_fva_with_no_medium(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False,
+                                max_flux_value=1000.):
+        model = self.community_model.copy()
+        model.medium = {}
+
+        if composition_agnostic:
+            with model as composition_agnostic_model:
+                for reaction in composition_agnostic_model.reactions:
+                    if reaction.lower_bound > 0.:
+                        reaction.lower_bound = 0.
+                    elif reaction.lower_bound < -max_flux_value:
+                        reaction.lower_bound = -max_flux_value
+                    if reaction.upper_bound < 0.:
+                        reaction.upper_bound = 0.
+                    elif reaction.upper_bound > max_flux_value:
+                        reaction.upper_bound = max_flux_value
+                solution_df = cobra.flux_analysis.flux_variability_analysis(composition_agnostic_model,
+                                                                            composition_agnostic_model.reactions,
+                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                            loopless=loopless)
+        else:
+            solution_df = cobra.flux_analysis.flux_variability_analysis(model, model.reactions,
+                                                                        fraction_of_optimum=fraction_of_optimum,
+                                                                        loopless=loopless)
+
+        solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
+        solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
+
+        return solution_df
+
     def run_fva(self, unconstrained=False, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False):
         if unconstrained:
             model = self.unconstrained_model
@@ -656,10 +697,12 @@ class CommunityModel:
                     if reaction.upper_bound < 0.:
                         reaction.upper_bound = 0.
                 solution_df = cobra.flux_analysis.flux_variability_analysis(composition_agnostic_model, reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum, loopless=loopless)
+                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                            loopless=loopless)
         else:
             solution_df = cobra.flux_analysis.flux_variability_analysis(model, reactions,
-                                                                        fraction_of_optimum=fraction_of_optimum, loopless=loopless)
+                                                                        fraction_of_optimum=fraction_of_optimum,
+                                                                        loopless=loopless)
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
@@ -708,13 +751,15 @@ class CommunityModel:
         exchg_metabolite_df["cross_feeding"] = cross_feeding_mask
         return exchg_metabolite_df
 
-    def cross_feeding_metabolites_from_fva(self, unconstrained=False, fraction_of_optimum=0., composition_agnostic=False):
+    def cross_feeding_metabolites_from_fva(self, unconstrained=False, fraction_of_optimum=0.,
+                                           composition_agnostic=False):
         if unconstrained:
             model = self.unconstrained_model
         else:
             model = self.community_model
 
-        solution_df = self.run_fva(unconstrained=unconstrained, fraction_of_optimum=fraction_of_optimum, composition_agnostic=composition_agnostic)
+        solution_df = self.run_fva(unconstrained=unconstrained, fraction_of_optimum=fraction_of_optimum,
+                                   composition_agnostic=composition_agnostic)
         rows = []
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == "exchg")
         member_names = self.get_member_names()
@@ -753,7 +798,8 @@ class CommunityModel:
         member_names = self.get_member_names()
 
         for idx, row in exchg_metabolite_df.iterrows():
-            row_dict = {"metabolite_id": row["metabolite_id"], "metabolite_name": row["metabolite_name"], "cross_feeding": row["cross_feeding"], "produced_by": [], "consumed_by": []}
+            row_dict = {"metabolite_id": row["metabolite_id"], "metabolite_name": row["metabolite_name"],
+                        "cross_feeding": row["cross_feeding"], "produced_by": [], "consumed_by": []}
             for member in member_names:
                 if row[member + "_min_flux"] < 0.:
                     row_dict["consumed_by"].append(member)
@@ -768,6 +814,51 @@ class CommunityModel:
         exchange_fva_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=0.,
                                                                   composition_agnostic=True)
         return self.format_exchg_rxns(exchange_fva_df)
+
+    def report(self, verbose=True):
+        report_dict = {}
+        num_metabolites = len(self.community_model.metabolites)
+        num_reactions = len(self.community_model.reactions)
+        num_genes = len(self.community_model.genes)
+        member_names = self.get_member_names()
+        num_members = len(member_names)
+        objective_expression = self.community_model.objective.expression
+        objective_direction = self.community_model.objective.direction
+        unbalanced_reactions = self.get_unbalanced_reactions()
+        num_unbalanced_reactions = len(unbalanced_reactions)
+        reactions_in_loops = self.get_loops()
+        num_loop_reactions = len(reactions_in_loops)
+        report_dict = {"community_name": self.name,
+                        "num_metabolites": num_metabolites,
+                        "num_reactions": num_reactions,
+                        "num_genes": num_genes,
+                        "member_names": member_names,
+                        "num_members": num_members,
+                        "objective_expression": objective_expression,
+                        "objective_direction": objective_direction,
+                        "unbalanced_reactions": unbalanced_reactions,
+                        "num_unbalanced_reactions": num_unbalanced_reactions,
+                        "reactions_in_loops": reactions_in_loops,
+                        "num_loop_reactions": num_loop_reactions
+                        }
+        if verbose:
+            print(f"Name: {self.name}")
+            print("------------------")
+            print("Model overview")
+            print(f"# Metabolites: {num_metabolites}")
+            print(f"# Reactions: {num_reactions}")
+            print(f"# Genes: {num_genes}")
+            print(f"# Members: {num_members}")
+            print(f"Members:")
+            for member in member_names:
+                print(f"\t{member}")
+            print(f"Objective in direction {objective_direction}:\n\t{objective_expression}")
+            print("------------------")
+            print("Model quality")
+            print(f"# Reactions unbalanced: {num_unbalanced_reactions}")
+            print(f"# Reactions able to carry flux without a medium: {num_loop_reactions}")
+
+        return report_dict
 
     def save(self, file_path):
         """
@@ -806,7 +897,6 @@ class CommunityModel:
         constructor_args["unconstrained_model"] = cobra.io.read_sbml_model(file_path)
         name = constructor_args["unconstrained_model"].id
         return cls(name=name, **constructor_args)
-
 
 
 def doall(model_folder="", models=[], community_name="community_model", abundance="equal", medium=None,
