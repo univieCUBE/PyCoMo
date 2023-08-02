@@ -89,6 +89,7 @@ def close_to_zero(num, t=10**-10):
 
 
 def get_model_biomass_compound(model, expected_biomass_id="", generate_if_none=False):
+    """This will produce a biomass metabolite with a unique production reaction"""
     objective = str(model.objective.expression).split("*")[1].split(' ')[0]
     biomass_rxn = model.reactions.get_by_id(objective)
     biomass_products = model.reactions.get_by_id(objective).products

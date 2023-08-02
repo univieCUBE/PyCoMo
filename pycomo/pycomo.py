@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 """
+Authors: Michael Predl, Marianne Mießkes
 The pycomo module contains classes for single species and community metabolic models. They extend the cobrapy classes
 by metainformation required for community model generation. The community model can be used for simulation, transfer via
  the sbml format, setting abundances and generation of FBA flux vector tables.
@@ -369,15 +370,23 @@ class CommunityModel:
     name: str
     medium_flag: bool = False
     abundance_flag: bool = False
+    fraction_reaction_flag: bool = False
+    mu_c: float = 1.
+    fixed_abundance_flag: bool = False
+    fixed_growth_rate_flag: bool = False
     _unconstrained_model: cobra.Model = None
     _community_model: cobra.Model = None
     _medium: dict = None
     _merge_via_annotation: str = None
     _abundance_dict: dict = None
-    _member_names = None
+    _member_names: list = None
+    _constraint_mets: dict = None
+    _backup_metabolites: list = []
 
-    def __init__(self, models=None, name="", merge_via_annotation=None, **kwargs):
+    def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, **kwargs):
         self.models = models
+        self.fraction_reaction_flag = fraction_flag
+        self.mu_c = mu_c
 
         if models is not None:
             model_names = [model.name for model in self.models]
@@ -484,16 +493,26 @@ class CommunityModel:
 
     def generate_community_model(self):
         merged_model = None
-        biomass_mets = []
+        biomass_mets = {}
         idx = 0
         for model in self.models:
             idx += 1
             if idx == 1:
                 merged_model = model.prepare_for_merging()
                 biomass_met_id = model.biomass_met.id
-                biomass_mets.append(merged_model.metabolites.get_by_id(biomass_met_id))
+                biomass_met = merged_model.metabolites.get_by_id(biomass_met_id)
+                biomass_mets[model.name] = biomass_met
+
+                if self.fraction_reaction_flag:
+                    rxn = cobra.Reaction(f"{model.name}_to_community_biomass")
+                    rxn.add_metabolites({biomass_met: -1})
+                    merged_model.add_reactions([rxn])
+                    self.create_fraction_reaction(merged_model, biomass_met_id)
+
+
             else:
                 extended_model = model.prepare_for_merging()
+
                 unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model,
                                                                                              merged_model)
                 for met_id in unbalanced_metabolites:
@@ -507,28 +526,66 @@ class CommunityModel:
                     print(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
                           f"Please make sure that the metabolite with this ID is indeed representing the same substance"
                           f" in all models!")
-                merged_model.merge(extended_model)
-                biomass_met_id = model.biomass_met.id
-                biomass_mets.append(merged_model.metabolites.get_by_id(biomass_met_id))
 
-        biomass_met = cobra.Metabolite("cpd11416_exchg", name='Community Biomass', compartment='exchg')
-        merged_model.add_metabolites([biomass_met])
-        biomass_rxn = cobra.Reaction("community_biomass")
-        biomass_rxn.name = "Community Biomass Reaction"
-        biomass_rxn.lower_bound = 0.
-        biomass_rxn.upper_bound = 1000.
-        rxn_mets = {}
-        for met in biomass_mets:
-            rxn_mets[met] = -1.
-        rxn_mets[biomass_met] = 1.
-        biomass_rxn.add_metabolites(rxn_mets)
-        merged_model.add_reactions([biomass_rxn])
-        merged_model.add_boundary(merged_model.metabolites.get_by_id("cpd11416_exchg"), type="exchange", lb=0.)
+                biomass_met_id = model.biomass_met.id
+
+                if self.fraction_reaction_flag:
+                    biomass_met = extended_model.metabolites.get_by_id(biomass_met_id)
+                    biomass_mets[model.name] = biomass_met
+                    rxn = cobra.Reaction(f"{model.name}_to_community_biomass")
+                    rxn.add_metabolites({biomass_met: -1})
+                    extended_model.add_reactions([rxn])
+                    self.create_fraction_reaction(extended_model, biomass_met_id)
+
+                merged_model.merge(extended_model)
+                biomass_mets[model.name] = merged_model.metabolites.get_by_id(biomass_met_id)
+
+        if self.fraction_reaction_flag:
+            self.fixed_growth_rate_flag = True
+            self.fixed_abundance_flag = False
+            self.merge_fraction_reactions(merged_model)
+            self._add_fixed_abundance_reaction(merged_model)
+
+        # old implementation of community biomass reactions
+        if not self.fraction_reaction_flag:
+            biomass_met = cobra.Metabolite("cpd11416_exchg", name='Community Biomass', compartment='exchg')
+            merged_model.add_metabolites([biomass_met])
+            biomass_rxn = cobra.Reaction("community_biomass")
+            biomass_rxn.name = "Community Biomass Reaction"
+            biomass_rxn.lower_bound = 0.
+            biomass_rxn.upper_bound = 1000.
+            rxn_mets = {}
+            for model, met in biomass_mets.items():
+                rxn_mets[met] = -1.
+            rxn_mets[biomass_met] = 1.
+            biomass_rxn.add_metabolites(rxn_mets)
+            merged_model.add_reactions([biomass_rxn])
+
+            cpd11416_exchg = merged_model.metabolites.get_by_id("cpd11416_exchg")
+            cpd11416_exchg_rxn = cobra.Reaction("EX_cpd11416_exchg", name="community biomass exchange")
+            cpd11416_exchg_rxn.lower_bound = 0.
+            cpd11416_exchg_rxn.upper_bound = 1000.
+            cpd11416_exchg_rxn.add_metabolites({cpd11416_exchg: -1})
+            merged_model.add_reactions([cpd11416_exchg_rxn])
+
+        # new implementation of community biomass reaction
+        else:
+            biomass_met = cobra.Metabolite("cpd11416_exchg", name='Community Biomass', compartment='exchg')
+            biomass_rxn = cobra.Reaction("community_biomass")
+            biomass_rxn.add_metabolites({biomass_met: -1})
+            merged_model.add_reactions([biomass_rxn])
+            # create additional reactions for each biomass reaction of a suborganism
+            for member, met in biomass_mets.items():
+                rxn = merged_model.reactions.get_by_id(f"{member}_to_community_biomass")
+                rxn.add_metabolites({met: -1, biomass_met: 1}, combine=False)
+            # set mu_c for the community, default = 1
+            self.apply_fixed_growth_rate(self.mu_c, merged_model)
+
         merged_model.objective = "community_biomass"
 
         # Remove old biomass reactions
         old_biomass_exchange_rxns = []
-        for met in biomass_mets:
+        for model, met in biomass_mets.items():
             for rxn in met.reactions:
                 if rxn in merged_model.exchanges:
                     old_biomass_exchange_rxns.append(rxn)
@@ -540,9 +597,266 @@ class CommunityModel:
 
         if not self.is_mass_balanced():
             print(
-                "WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
+                "WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are "
+                "imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
 
         return merged_model
+
+    def create_fraction_reaction(self, model, biomass_met_id):
+        # TODO: Check if model.id is the correct version, as name is not SID compliant
+        fraction_reaction = cobra.Reaction(f"{model.id}_fraction_reaction")
+        # create f_final metabolite
+        f_final_met = cobra.Metabolite("f_final_met", name='Final Fraction Reaction Metabolite',
+                                       compartment='fraction_reaction')
+        fraction_reaction.add_metabolites({f_final_met: 1})
+        # create biomass_metabolite for fraction reaction
+        f_biomass_met = cobra.Metabolite(f'{model.id}_f_biomass_met', name=f'Fraction Biomass Metabolite of {model.id}',
+                                         compartment='fraction_reaction')
+
+        biomass_rxn = model.reactions.get_by_id(f"{model.id}_to_community_biomass")
+        # TODO: Biomass ID might be known if called on community model or single model object, function argument
+        #  might be better
+        fraction_reaction.add_metabolites({f_biomass_met: 1})
+        biomass_rxn.add_metabolites({f_biomass_met: -1})
+        # add fraction reaction to model
+        model.add_reactions([fraction_reaction])
+        # convert constraints of S.O.M to metabolites and add them to fraction reaction and constrained S.O.M reactions
+        self._constraint_mets = self.convert_constraints_to_metabolites(model)
+        self.add_sink_reactions_to_metabolites(model)
+        self.add_constraint_metabolites_to_reactions(model)
+        self.reset_bounds_after_creating_fraction_reaction()
+
+    def convert_constraints_to_metabolites(self, model):
+        # create empty dictionary for constrained metabolites
+        constrained_mets = {}  # keys: metabolite, values: coefficent
+        for reaction in model.reactions:
+            if reaction not in model.exchanges and "fraction_reaction" not in reaction.id:
+                # create constraint metabolites
+                met_lb = cobra.Metabolite(f'{reaction.id}_lb', name=f'{reaction.id} lower bound',
+                                          compartment='fraction_reaction')
+                met_ub = cobra.Metabolite(f'{reaction.id}_ub', name=f'{reaction.id} upper bound',
+                                          compartment='fraction_reaction')
+                # add constrained metabolites to the constrained_mets dictionary
+                if reaction.lower_bound != 0:
+                    constrained_mets[met_lb] = reaction.lower_bound
+                if reaction.upper_bound != 0:
+                    constrained_mets[met_ub] = reaction.upper_bound
+        return constrained_mets
+
+    def add_constraint_metabolites_to_reactions(self, model):
+        fraction_reaction = None
+        # find the fraction_reaction
+        for reaction in model.reactions:
+            if "fraction_reaction" in reaction.id:
+                fraction_reaction = reaction
+        for met, coefficient in self._constraint_mets.items():
+            if '_ub' in met.id:
+                # add metabolite to the fraction_reaction
+                fraction_reaction.add_metabolites({met: coefficient})
+                # add constraint metabolite to its corresponding reaction
+                rxn = model.reactions.get_by_id(met.id[0:-3])
+                rxn.add_metabolites({met: -1})
+            elif '_lb' in met.id:
+                # add metabolite to the fraction_reaction
+                fraction_reaction.add_metabolites({met: -coefficient})
+                # add constraint metabolite to its corresponding reaction
+                rxn = model.reactions.get_by_id(met.id[0:-3])
+                rxn.add_metabolites({met: 1})
+
+    def add_sink_reactions_to_metabolites(self, model, lb=0., inplace=True):
+        if not inplace:
+            model = model.copy()
+
+        for met in self._constraint_mets:
+            # TODO: Create the reactions without use of add_boundary, as this attaches the SBO term for boundary
+            #  reactions, leading to problems with the find exchange compartment heuristic
+            model.add_boundary(met, type="sink", lb=lb, ub=100000)
+
+        model.repair()
+
+        if inplace:
+            return
+        else:
+            return model
+
+    def merge_fraction_reactions(self, merged_model):
+        # create f_final reaction
+        # This ensures that the fractions sum up to 1
+        f_final = cobra.Reaction("f_final", name="final fraction reaction")
+        f_final.bounds = (1, 1)
+        f_final_met = merged_model.metabolites.get_by_id("f_final_met")
+        f_final.add_metabolites({f_final_met: -1})
+        merged_model.add_reactions([f_final])
+
+    def apply_fixed_growth_rate(self, flux, model=None):
+        if not self.fixed_growth_rate_flag:
+            print("Error: The model needs to be in fixed growth rate structure to set a fixed growth rate.")
+            return
+        self.mu_c = flux
+
+        if model is None:
+            model = self.community_model
+        model.reactions.get_by_id("community_biomass").bounds = (flux, flux)
+        counter = 0
+        # TODO: update to iterate over member names and target reaction and metabolite directly, remove backup
+        #  metabolites
+        for reaction in model.reactions:
+            if "fraction_reaction" in reaction.id:
+                done_flag = False
+                for met in reaction.metabolites:
+                    if "f_biomass_met" in met.id:
+                        done_flag = True
+                        if flux == 0:
+                            self._backup_metabolites.append(met)
+                        reaction.add_metabolites({met: flux}, combine=False)
+                if not done_flag:
+                    reaction.add_metabolites({self._backup_metabolites[counter]: flux}, combine=False)
+                    counter += 1
+        if flux != 0:
+            self._backup_metabolites = []
+
+    def reset_bounds_after_creating_fraction_reaction(self):
+        for met in self._constraint_mets:
+            for reaction in met.reactions:
+                if "fraction_reaction" not in reaction.id and met.id not in reaction.id:
+                    if reaction.lower_bound < 0:
+                        reaction.lower_bound = -1000
+                    else:
+                        reaction.lower_bound = 0
+                    if reaction.upper_bound <= 0:
+                        reaction.upper_bound = 0
+                    else:
+                        reaction.upper_bound = 1000
+
+    def _add_fixed_abundance_reaction(self, model):
+        # add an abundance reaction to the model for fixed abundance model structure (used later)
+        abd_rxn = cobra.Reaction("abundance_reaction")
+        abd_rxn.name = "Abundance Reaction"
+        abd_rxn.bounds = (0., 0.)  # Not used in fixed growth
+
+        abd_rxn_mets = {}
+        for member_name in self.get_member_names():
+            f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
+            abd_rxn_mets[f_bio_met] = 1.
+
+        abd_rxn.add_metabolites(abd_rxn_mets)
+
+        model.add_reaction(abd_rxn)
+
+    def convert_to_fixed_abundance(self, abundance_dict=None):
+        """This function changes the model structure to fixed abundance, but variable growth rate. The model is left
+        unchanged if it is already in fixed abundance structure."""
+        if self.fixed_abundance_flag:
+            print(f"Note: Model already has fixed abundance structure.")
+            return
+
+        model = self.community_model
+
+        # Remove the f_bio metabolites from the fraction reactions
+        for reaction in model.reactions:
+            if "fraction_reaction" in reaction.id:
+                for met in reaction.metabolites:
+                    if "f_biomass_met" in met.id:
+                        self._backup_metabolites.append(met)
+                        reaction.add_metabolites({met: 0}, combine=False)
+
+        # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
+        model.reactions.get_by_id("abundance_reaction").bounds = (0., 1000.)
+
+        # Relax the community biomass reaction constraints
+        model.reactions.get_by_id("community_biomass").bounds = (0., 1000.)
+
+        # Set the model structure flags correctly
+        self.fixed_abundance_flag = True
+        self.fixed_growth_rate_flag = False
+
+        # Apply the abundance - if none was specified, use equal abundance
+        if abundance_dict is None:
+            abundance_dict = self.generate_equal_abundance_dict()
+
+        self.apply_fixed_abundance(abundance_dict)
+
+        return
+
+    def apply_fixed_abundance(self, abd_dict):
+        """Applying fixed abundance to the model. This is only available if the model is in fixed abundance structure
+        (check fixed_abundance_flag)."""
+        if not self.fixed_abundance_flag:
+            print("Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
+                  "Convert the model to fixed abundance structure first.")
+            return
+
+        # Check if organism names are in the model
+        try:
+            assert all([name in self.get_member_names() for name in abd_dict.keys()])
+        except AssertionError:
+            print(f"Error: Some names in the abundances are not part of the model.")
+            print(f"\tAbundances: {abd_dict.keys()}")
+            print(f"\tOrganisms in model: {self.get_member_names()}")
+            raise AssertionError
+
+        # Check that abundances sum to 1
+        try:
+            assert np.isclose([sum(abd_dict.values())], [1.])
+        except AssertionError:
+            print(f"Warning: Abundances do not sum up to 1. Correction will be applied")
+            if sum(abd_dict.values()) == 0.:
+                print(f"Error: The sum of abundances is 0")
+                raise ValueError
+            correction_factor = 1 / sum(abd_dict.values())
+            for name, abundance in abd_dict.items():
+                abd_dict[name] = abundance * correction_factor
+            print(f"Correction applied. New abundances are:\n{abd_dict}")
+            assert np.isclose([sum(abd_dict.values())], [1.])
+
+        # Extend abundances to include all organisms of model
+        for name in self.get_member_names():
+            if name not in abd_dict.keys():
+                abd_dict[name] = 0.
+
+        # Apply the abundance as ratios of f_biomass metabolites
+        model = self.community_model
+        abd_rxn_mets = {}
+        for member_name, fraction in abd_dict.items():
+            f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
+            f_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+            f_rxn.bounds = (0., fraction)
+            abd_rxn_mets[f_bio_met] = fraction
+
+        abd_rxn = model.reactions.get_by_id("abundance_reaction")
+        abd_rxn.add_metabolites(abd_rxn_mets, combine=False)
+
+        return
+
+    def convert_to_fixed_growth_rate(self, mu_c=None):
+        """This function changes the model structure to fixed growth rate, but variable abundance profile. The model
+        is left unchanged if it is already in fixed abundance structure."""
+        if self.fixed_growth_rate_flag:
+            print(f"Note: Model already has fixed growth rate structure.")
+            return
+
+        model = self.community_model
+
+        if mu_c is None:
+            mu_c = self.mu_c
+
+        # Deactivate the source reaction for coupled f_bio metabolites, constrained to the abundance
+        model.reactions.get_by_id("abundance_reaction").bounds = (0., 0.)
+
+        # Reset the fraction reaction bounds
+        for member_name in self.get_member_names():
+            f_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+            f_rxn.bounds = (0., 1.)
+
+        # Set the model structure flags correctly
+        self.fixed_abundance_flag = False
+        self.fixed_growth_rate_flag = True
+
+        # Add the f_biomass metabolites to the fraction reactions and apply mu_c to the biomass reaction bounds
+        self.apply_fixed_growth_rate(flux=mu_c)
+
+        return
+
 
     def apply_abundance(self, abd_dict):
         # Check if organism names are in the model
@@ -606,6 +920,13 @@ class CommunityModel:
         for name in names:
             abundances[name] = 1. / len(names)
         return self.apply_abundance(abundances)
+
+    def generate_equal_abundance_dict(self):
+        abundances = {}
+        names = self.get_member_names()
+        for name in names:
+            abundances[name] = 1. / len(names)
+        return abundances
 
     def load_medium_from_file(self, file_path):
         # load the medium dictionary
