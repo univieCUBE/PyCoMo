@@ -374,6 +374,8 @@ class CommunityModel:
     mu_c: float = 1.
     fixed_abundance_flag: bool = False
     fixed_growth_rate_flag: bool = False
+    _f_metabolites: list = None
+    _f_reactions: list = None
     _unconstrained_model: cobra.Model = None
     _community_model: cobra.Model = None
     _medium: dict = None
@@ -448,6 +450,29 @@ class CommunityModel:
         return self._community_model
 
     @property
+    def f_metabolites(self):
+        return self._f_metabolites
+
+    @f_metabolites.getter
+    def f_metabolites(self):
+        self._f_metabolites = self.community_model.metabolites.query(lambda x: x.compartment == "fraction_reaction")
+        if self._f_metabolites is None:
+            self._f_metabolites = []
+        return self._f_metabolites
+
+    @property
+    def f_reactions(self):
+        return self._f_reactions
+
+    @f_reactions.getter
+    def f_reactions(self):
+        self._f_reactions = self.community_model.reactions.query(
+            lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+        if self._f_reactions is None:
+            self._f_reactions = []
+        return self._f_reactions
+
+    @property
     def medium(self):
         return self._medium
 
@@ -468,8 +493,21 @@ class CommunityModel:
             raise AssertionError
         self._medium = medium_dict
 
-    def summary(self):
-        return self.community_model.summary()
+    def summary(self, suppress_f_metabolites=True):
+        summary = self.community_model.summary()
+
+        if suppress_f_metabolites:
+            model = self.community_model
+            new_secretion_flux_rows = []
+            old_secretion_flux = summary.secretion_flux
+            for idx, row in old_secretion_flux.iterrows():
+                if model.metabolites.get_by_id(row["metabolite"]).compartment != "fraction_reaction":
+                    new_secretion_flux_rows.append(row)
+
+            new_secretion_flux = pd.DataFrame(new_secretion_flux_rows)
+            summary.secretion_flux = new_secretion_flux
+
+        return summary
 
     def generate_member_name_conversion_dict(self):
         conversion_dict = {}
@@ -498,7 +536,8 @@ class CommunityModel:
             no_medium_model.medium = no_medium
             solution_df = self._run_fva_with_no_medium(fraction_of_optimum=0., composition_agnostic=True,
                                                        loopless=False)
-        return solution_df[(~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
+        return solution_df[
+            (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
 
     def generate_community_model(self):
         merged_model = None
@@ -677,8 +716,6 @@ class CommunityModel:
             model = model.copy()
 
         for met in self._constraint_mets:
-            # TODO: Create the reactions without use of add_boundary, as this attaches the SBO term for boundary
-            #  reactions, leading to problems with the find exchange compartment heuristic
             model.add_boundary(met, type="sink", lb=lb, ub=100000)
 
         model.repair()
@@ -855,7 +892,6 @@ class CommunityModel:
         self.apply_fixed_growth_rate(flux=mu_c)
 
         return
-
 
     def apply_abundance(self, abd_dict):
         # Check if organism names are in the model
@@ -1138,7 +1174,11 @@ class CommunityModel:
     def report(self, verbose=True):
         report_dict = {}
         num_metabolites = len(self.community_model.metabolites)
+        num_f_metabolites = len(self.f_metabolites)
+        num_model_metabolites = num_metabolites - num_f_metabolites
         num_reactions = len(self.community_model.reactions)
+        num_f_reactions = len(self.f_reactions)
+        num_model_reactions = num_reactions - num_f_reactions
         num_genes = len(self.community_model.genes)
         member_names = self.get_member_names()
         num_members = len(member_names)
@@ -1149,24 +1189,32 @@ class CommunityModel:
         reactions_in_loops = self.get_loops()
         num_loop_reactions = len(reactions_in_loops)
         report_dict = {"community_name": self.name,
-                        "num_metabolites": num_metabolites,
-                        "num_reactions": num_reactions,
-                        "num_genes": num_genes,
-                        "member_names": member_names,
-                        "num_members": num_members,
-                        "objective_expression": objective_expression,
-                        "objective_direction": objective_direction,
-                        "unbalanced_reactions": unbalanced_reactions,
-                        "num_unbalanced_reactions": num_unbalanced_reactions,
-                        "reactions_in_loops": reactions_in_loops,
-                        "num_loop_reactions": num_loop_reactions
-                        }
+                       "num_metabolites": num_metabolites,
+                       "num_f_metabolites": num_f_metabolites,
+                       "num_model_metabolites": num_model_metabolites,
+                       "num_reactions": num_reactions,
+                       "num_f_reactions": num_f_reactions,
+                       "num_model_reactions": num_model_reactions,
+                       "num_genes": num_genes,
+                       "member_names": member_names,
+                       "num_members": num_members,
+                       "objective_expression": objective_expression,
+                       "objective_direction": objective_direction,
+                       "unbalanced_reactions": unbalanced_reactions,
+                       "num_unbalanced_reactions": num_unbalanced_reactions,
+                       "reactions_in_loops": reactions_in_loops,
+                       "num_loop_reactions": num_loop_reactions
+                       }
         if verbose:
             print(f"Name: {self.name}")
             print("------------------")
             print("Model overview")
             print(f"# Metabolites: {num_metabolites}")
+            print(f"# Constraint (f-) Metabolites: {num_f_metabolites}")
+            print(f"# Model Metabolites: {num_model_metabolites}")
             print(f"# Reactions: {num_reactions}")
+            print(f"# Constraint (f-) Reactions: {num_f_reactions}")
+            print(f"# Model Reactions: {num_model_reactions}")
             print(f"# Genes: {num_genes}")
             print(f"# Members: {num_members}")
             print(f"Members:")
