@@ -468,6 +468,9 @@ class CommunityModel:
             raise AssertionError
         self._medium = medium_dict
 
+    def summary(self):
+        return self.community_model.summary()
+
     def generate_member_name_conversion_dict(self):
         conversion_dict = {}
         for member in self.models:
