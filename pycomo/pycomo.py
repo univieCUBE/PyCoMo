@@ -826,6 +826,8 @@ class CommunityModel:
         abd_rxn = model.reactions.get_by_id("abundance_reaction")
         abd_rxn.add_metabolites(abd_rxn_mets, combine=False)
 
+        self._abundance_dict = abd_dict
+
         return
 
     def convert_to_fixed_growth_rate(self, mu_c=None):
@@ -1200,6 +1202,12 @@ class CommunityModel:
 
         for member, fraction in abundances.items():
             create_abundance_parameter(sbml_model=sbml_model, member_id=member, abundance=fraction)
+
+        create_parameter_in_sbml_model(sbml_model, "fixed_abundance_flag", False,
+                                       value=(1 if self.fixed_abundance_flag else 0))
+        create_parameter_in_sbml_model(sbml_model, "fixed_growth_rate_flag", False,
+                                       value=(1 if self.fixed_growth_rate_flag else 0))
+        create_parameter_in_sbml_model(sbml_model, "mu_c", False, value=self.mu_c)
 
         libsbml.writeSBMLToFile(sbml_doc, file_path)
 
