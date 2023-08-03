@@ -253,6 +253,35 @@ def get_abundance_parameters_from_sbml_doc(sbml_model):
     return abundance_dict
 
 
+def get_flags_and_muc_from_sbml_file(sbml_file):
+    sbml_model = read_sbml_model_from_file(sbml_file)
+
+    parameter_dict = {}
+
+    for parameter in sbml_model.getListOfParameters():
+        parameter_id = parameter.getId()
+        if parameter_id == "mu_c":
+            value = 1.
+            if parameter.isSetValue():
+                value = parameter.getValue()
+            parameter_dict["mu_c"] = value
+        if parameter_id == "fixed_abundance_flag":
+            value = 0
+            if parameter.isSetValue():
+                value = parameter.getValue()
+            value = value == 1  # Flags are stored as 1 and 0 for True and False. None is converted to False
+            parameter_dict["fixed_abundance_flag"] = value
+        if parameter_id == "fixed_growth_rate_flag":
+            value = 0
+            if parameter.isSetValue():
+                value = parameter.getValue()
+            value = value == 1  # Flags are stored as 1 and 0 for True and False. None is converted to False
+            parameter_dict["fixed_growth_rate_flag"] = value
+
+    return parameter_dict
+
+
+
 def get_abundance_parameters_from_sbml_file(sbml_file):
     sbml_model = read_sbml_model_from_file(sbml_file)
     return get_abundance_parameters_from_sbml_doc(sbml_model)

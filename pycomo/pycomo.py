@@ -410,11 +410,17 @@ class CommunityModel:
             for model in self.models:
                 model.set_name_via_annotation(merge_via_annotation)
 
+        if "fixed_abundance" in kwargs.keys():
+            self.fixed_abundance_flag = kwargs["fixed_abundance"]
+
+        if "fixed_growth_rate" in kwargs.keys():
+            self.fixed_growth_rate_flag = kwargs["fixed_growth_rate"]
+
         if "unconstrained_model" in kwargs.keys():
             self._unconstrained_model = kwargs["unconstrained_model"]
 
         if "abundance_profile" in kwargs.keys():
-            self.apply_abundance(kwargs["abundance_profile"])
+            self._abundance_dict = kwargs["abundance_profile"]
 
     @property
     def unconstrained_model(self):
@@ -700,20 +706,10 @@ class CommunityModel:
         counter = 0
         # TODO: update to iterate over member names and target reaction and metabolite directly, remove backup
         #  metabolites
-        for reaction in model.reactions:
-            if "fraction_reaction" in reaction.id:
-                done_flag = False
-                for met in reaction.metabolites:
-                    if "f_biomass_met" in met.id:
-                        done_flag = True
-                        if flux == 0:
-                            self._backup_metabolites.append(met)
-                        reaction.add_metabolites({met: flux}, combine=False)
-                if not done_flag:
-                    reaction.add_metabolites({self._backup_metabolites[counter]: flux}, combine=False)
-                    counter += 1
-        if flux != 0:
-            self._backup_metabolites = []
+        for member_name in self.get_member_names():
+            fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+            fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+            fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
 
     def reset_bounds_after_creating_fraction_reaction(self):
         for met in self._constraint_mets:
@@ -753,12 +749,10 @@ class CommunityModel:
         model = self.community_model
 
         # Remove the f_bio metabolites from the fraction reactions
-        for reaction in model.reactions:
-            if "fraction_reaction" in reaction.id:
-                for met in reaction.metabolites:
-                    if "f_biomass_met" in met.id:
-                        self._backup_metabolites.append(met)
-                        reaction.add_metabolites({met: 0}, combine=False)
+        for member_name in self.get_member_names():
+            fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+            fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+            fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
         # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
         model.reactions.get_by_id("abundance_reaction").bounds = (0., 1000.)
@@ -1188,7 +1182,7 @@ class CommunityModel:
         Save the community model object as a SBML file. This also includes the names of the community members and their abundance (if set).
         """
         # Generate a libsbml.model object
-        cobra.io.write_sbml_model(self._unconstrained_model, filename=file_path)
+        cobra.io.write_sbml_model(self.community_model, filename=file_path)
         sbml_doc = cobra.io.sbml._get_doc_from_filename(file_path)
         sbml_model = sbml_doc.getModel()
 
@@ -1219,13 +1213,20 @@ class CommunityModel:
         abundance_parameters = get_abundance_parameters_from_sbml_file(file_path)
         assert len(abundance_parameters) > 0
 
+        flags_and_muc = get_flags_and_muc_from_sbml_file(file_path)
+        assert len(flags_and_muc) == 3
+
         constructor_args = {}
         constructor_args["member_names"] = list(abundance_parameters.keys())
         if any([val is not None for val in abundance_parameters.values()]):
             constructor_args["abundance_profile"] = abundance_parameters
         constructor_args["unconstrained_model"] = cobra.io.read_sbml_model(file_path)
+
+        constructor_args["fixed_abundance"] = flags_and_muc["fixed_abundance_flag"]
+        constructor_args["fixed_growth_rate"] = flags_and_muc["fixed_growth_rate_flag"]
+
         name = constructor_args["unconstrained_model"].id
-        return cls(name=name, **constructor_args)
+        return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
 
 def doall(model_folder="", models=[], community_name="community_model", abundance="equal", medium=None,
