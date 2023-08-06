@@ -383,7 +383,7 @@ class CommunityModel:
     _abundance_dict: dict = None
     _member_names: list = None
     _constraint_mets: dict = None
-    _backup_metabolites: list = []
+    _backup_metabolites: dict = {}
 
     def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, **kwargs):
         self.models = models
@@ -420,6 +420,13 @@ class CommunityModel:
 
         if "unconstrained_model" in kwargs.keys():
             self._unconstrained_model = kwargs["unconstrained_model"]
+            for member in self._member_names:
+                try:
+                    met = self._unconstrained_model.metabolites.get_by_id(f"{member}_f_biomass_met")
+                except KeyError:
+                    met = cobra.Metabolite(f'{member}_f_biomass_met', name=f'Fraction Biomass Metabolite of {model.id}',
+                                         compartment='fraction_reaction')
+                self._backup_metabolites[f"{member}_f_biomass_met"] = met
 
         if "abundance_profile" in kwargs.keys():
             self._abundance_dict = kwargs["abundance_profile"]
@@ -530,11 +537,13 @@ class CommunityModel:
         return not bool(self.get_unbalanced_reactions())
 
     def get_loops(self):
-        """This is a function to find closed loops that can sustain flux without any input or output. Such loops are thermodynamically infeasible and biologically non-sensical. Users should be aware of their presence and either remove them or check any model solutions for the presence of these cycles."""
+        """This is a function to find closed loops that can sustain flux without any input or output. Such loops are
+        thermodynamically infeasible and biologically non-sensical. Users should be aware of their presence and
+        either remove them or check any model solutions for the presence of these cycles."""
         no_medium = {}
         with self.community_model as no_medium_model:
             no_medium_model.medium = no_medium
-            solution_df = self._run_fva_with_no_medium(fraction_of_optimum=0., composition_agnostic=True,
+            solution_df = self._run_fva_with_no_medium(composition_agnostic=True,
                                                        loopless=False)
         return solution_df[
             (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
@@ -666,6 +675,7 @@ class CommunityModel:
         #  might be better
         fraction_reaction.add_metabolites({f_biomass_met: 1})
         biomass_rxn.add_metabolites({f_biomass_met: -1})
+        self._backup_metabolites[f"{model.id}_f_biomass_met"] = f_biomass_met
         # add fraction reaction to model
         model.add_reactions([fraction_reaction])
         # convert constraints of S.O.M to metabolites and add them to fraction reaction and constrained S.O.M reactions
@@ -748,8 +758,14 @@ class CommunityModel:
         #  metabolites
         for member_name in self.get_member_names():
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
-            fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-            fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+            try:
+                fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+            except KeyError:
+                fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
+                fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+
+        model.repair()
 
     def reset_bounds_after_creating_fraction_reaction(self):
         for met in self._constraint_mets:
@@ -806,7 +822,10 @@ class CommunityModel:
 
         # Apply the abundance - if none was specified, use equal abundance
         if abundance_dict is None:
-            abundance_dict = self.generate_equal_abundance_dict()
+            if self._abundance_dict is None:
+                abundance_dict = self.generate_equal_abundance_dict()
+            else:
+                abundance_dict = self._abundance_dict
 
         self.apply_fixed_abundance(abundance_dict)
 
@@ -852,7 +871,10 @@ class CommunityModel:
         model = self.community_model
         abd_rxn_mets = {}
         for member_name, fraction in abd_dict.items():
-            f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
+            try:
+                f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
+            except KeyError:
+                f_bio_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
             f_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             f_rxn.bounds = (0., fraction)
             abd_rxn_mets[f_bio_met] = fraction
@@ -861,6 +883,8 @@ class CommunityModel:
         abd_rxn.add_metabolites(abd_rxn_mets, combine=False)
 
         self._abundance_dict = abd_dict
+
+        model.repair()
 
         return
 
@@ -894,6 +918,7 @@ class CommunityModel:
         return
 
     def apply_abundance(self, abd_dict):
+        # TODO: deprecated
         # Check if organism names are in the model
         try:
             assert all([name in self.get_member_names() for name in abd_dict.keys()])
@@ -950,6 +975,7 @@ class CommunityModel:
         return abd_model
 
     def equal_abundance(self):
+        # TODO: deprecated
         abundances = {}
         names = self.get_member_names()
         for name in names:
@@ -1007,28 +1033,31 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def _run_fva_with_no_medium(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False,
-                                max_flux_value=1000.):
-        model = self.community_model.copy()
+    def _run_fva_with_no_medium(self, composition_agnostic=False, loopless=False):
+        """This function is only used for finding loops. It converts the model to fixed growth rate of 0 if
+        composition agnostic is wished. All changes are reverted."""
+        fraction_of_optimum = 0.
+        model = self.community_model
         model.medium = {}
 
         if composition_agnostic:
-            with model as composition_agnostic_model:
-                for reaction in composition_agnostic_model.reactions:
-                    if reaction.lower_bound > 0.:
-                        reaction.lower_bound = 0.
-                    elif reaction.lower_bound < -max_flux_value:
-                        reaction.lower_bound = -max_flux_value
-                    if reaction.upper_bound < 0.:
-                        reaction.upper_bound = 0.
-                    elif reaction.upper_bound > max_flux_value:
-                        reaction.upper_bound = max_flux_value
-                solution_df = cobra.flux_analysis.flux_variability_analysis(composition_agnostic_model,
-                                                                            composition_agnostic_model.reactions,
+            if self.fixed_growth_rate_flag:
+                mu_c = self.mu_c
+                self.apply_fixed_growth_rate(0.)
+                solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
+                                                                            self.community_model.reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
+                self.apply_fixed_growth_rate(mu_c)
+            else:
+                self.convert_to_fixed_growth_rate(mu_c=0.)
+                solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
+                                                                            self.community_model.reactions,
+                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                            loopless=loopless)
+                self.convert_to_fixed_abundance()
         else:
-            solution_df = cobra.flux_analysis.flux_variability_analysis(model, model.reactions,
+            solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model, self.community_model.reactions,
                                                                         fraction_of_optimum=fraction_of_optimum,
                                                                         loopless=loopless)
 
@@ -1046,17 +1075,23 @@ class CommunityModel:
         reactions = model.reactions.query(lambda x: any([met.compartment == "exchg" for met in x.metabolites.keys()]))
 
         if composition_agnostic:
-            with model as composition_agnostic_model:
-                for reaction in composition_agnostic_model.reactions:
-                    if reaction.lower_bound > 0.:
-                        reaction.lower_bound = 0.
-                    if reaction.upper_bound < 0.:
-                        reaction.upper_bound = 0.
-                solution_df = cobra.flux_analysis.flux_variability_analysis(composition_agnostic_model, reactions,
+            if self.fixed_growth_rate_flag:
+                mu_c = self.mu_c
+                self.apply_fixed_growth_rate(0.)
+                solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
+                                                                            reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
+                self.apply_fixed_growth_rate(mu_c)
+            else:
+                self.convert_to_fixed_growth_rate(mu_c=0.)
+                solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
+                                                                            reactions,
+                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                            loopless=loopless)
+                self.convert_to_fixed_abundance()
         else:
-            solution_df = cobra.flux_analysis.flux_variability_analysis(model, reactions,
+            solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model, reactions,
                                                                         fraction_of_optimum=fraction_of_optimum,
                                                                         loopless=loopless)
 
