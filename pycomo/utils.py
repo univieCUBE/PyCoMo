@@ -309,3 +309,23 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
             metabolites_without_overlap.append(met_id)
 
     return metabolites_without_overlap
+
+
+def relax_reaction_constraints_for_zero_flux(model):
+    """This function relaxes all constraints of a model to allow a flux of 0 in all reactions."""
+    for reaction in model.reactions:
+        if reaction.lower_bound > 0.:
+            reaction.lower_bound = 0.
+        if reaction.upper_bound < 0.:
+            reaction.upper_bound = 0.
+
+
+def find_loops_in_model(model):
+    """This function finds loops in models. This is accomplished by setting the medium to contain nothing and relax
+    all constraints to allow a flux of 0. Then, FVA is run on all reactions"""
+    loop_model = model.copy()
+    loop_model.medium = {}
+    relax_reaction_constraints_for_zero_flux(loop_model)
+    solution_df = cobra.flux_analysis.flux_variability_analysis(loop_model, loop_model.reactions,
+                                                                fraction_of_optimum=0., loopless=False)
+    return solution_df

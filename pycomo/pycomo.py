@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import libsbml
 import os
+from math import inf
 from typing import List
 from utils import *
 from cli import *
@@ -184,7 +185,7 @@ class SingleOrganismModel:
             exchg_comp = cobra.medium.find_external_compartment(model)
         comp_mets = model.metabolites.query(lambda x: x.compartment == exchg_comp)
         exchg_mets = [list(rxn.metabolites)[0] for rxn in model.exchanges]
-        mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - set([self.biomass_met]))
+        mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - {self.biomass_met})
         return mets_without_exchg
 
     def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True):
@@ -424,7 +425,7 @@ class CommunityModel:
                 try:
                     met = self._unconstrained_model.metabolites.get_by_id(f"{member}_f_biomass_met")
                 except KeyError:
-                    met = cobra.Metabolite(f'{member}_f_biomass_met', name=f'Fraction Biomass Metabolite of {model.id}',
+                    met = cobra.Metabolite(f'{member}_f_biomass_met', name=f'Fraction Biomass Metabolite of {member}',
                                          compartment='fraction_reaction')
                 self._backup_metabolites[f"{member}_f_biomass_met"] = met
 
@@ -433,6 +434,7 @@ class CommunityModel:
 
     @property
     def unconstrained_model(self):
+        # TODO: remove the unconstrained model, as it is not needed anymore.
         return self._unconstrained_model
 
     @unconstrained_model.getter
@@ -518,9 +520,12 @@ class CommunityModel:
 
     def generate_member_name_conversion_dict(self):
         conversion_dict = {}
-        for member in self.models:
-            old_name, new_name = member.get_name_conversion()
-            conversion_dict[old_name] = new_name
+        if self.models is not None:
+            for member in self.models:
+                old_name, new_name = member.get_name_conversion()
+                conversion_dict[old_name] = new_name
+        else:
+            print("Warning: There are no member models in the community model object.")
         return conversion_dict
 
     def get_member_names(self):
@@ -538,13 +543,19 @@ class CommunityModel:
 
     def get_loops(self):
         """This is a function to find closed loops that can sustain flux without any input or output. Such loops are
-        thermodynamically infeasible and biologically non-sensical. Users should be aware of their presence and
+        thermodynamically infeasible and biologically nonsensical. Users should be aware of their presence and
         either remove them or check any model solutions for the presence of these cycles."""
+        try:
+            original_medium = self.medium
+        except AssertionError:
+            original_medium = self.community_model.medium
         no_medium = {}
-        with self.community_model as no_medium_model:
-            no_medium_model.medium = no_medium
-            solution_df = self._run_fva_with_no_medium(composition_agnostic=True,
-                                                       loopless=False)
+        self.community_model.medium = no_medium
+
+        solution_df = self._run_fva_with_no_medium_for_loops(composition_agnostic=True,
+                                                             loopless=False)
+
+        self.community_model.medium = original_medium
         return solution_df[
             (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
 
@@ -564,8 +575,7 @@ class CommunityModel:
                     rxn = cobra.Reaction(f"{model.name}_to_community_biomass")
                     rxn.add_metabolites({biomass_met: -1})
                     merged_model.add_reactions([rxn])
-                    self.create_fraction_reaction(merged_model, biomass_met_id)
-
+                    self.create_fraction_reaction(merged_model, member_name=model.name)
 
             else:
                 extended_model = model.prepare_for_merging()
@@ -592,7 +602,7 @@ class CommunityModel:
                     rxn = cobra.Reaction(f"{model.name}_to_community_biomass")
                     rxn.add_metabolites({biomass_met: -1})
                     extended_model.add_reactions([rxn])
-                    self.create_fraction_reaction(extended_model, biomass_met_id)
+                    self.create_fraction_reaction(extended_model, member_name=model.name)
 
                 merged_model.merge(extended_model)
                 biomass_mets[model.name] = merged_model.metabolites.get_by_id(biomass_met_id)
@@ -659,36 +669,40 @@ class CommunityModel:
 
         return merged_model
 
-    def create_fraction_reaction(self, model, biomass_met_id):
-        # TODO: Check if model.id is the correct version, as name is not SID compliant
-        fraction_reaction = cobra.Reaction(f"{model.id}_fraction_reaction")
+    def create_fraction_reaction(self, model, member_name):
+        fraction_reaction = cobra.Reaction(f"{member_name}_fraction_reaction")
         # create f_final metabolite
         f_final_met = cobra.Metabolite("f_final_met", name='Final Fraction Reaction Metabolite',
                                        compartment='fraction_reaction')
         fraction_reaction.add_metabolites({f_final_met: 1})
         # create biomass_metabolite for fraction reaction
-        f_biomass_met = cobra.Metabolite(f'{model.id}_f_biomass_met', name=f'Fraction Biomass Metabolite of {model.id}',
+        f_biomass_met = cobra.Metabolite(f'{member_name}_f_biomass_met', name=f'Fraction Biomass Metabolite of {member_name}',
                                          compartment='fraction_reaction')
 
-        biomass_rxn = model.reactions.get_by_id(f"{model.id}_to_community_biomass")
-        # TODO: Biomass ID might be known if called on community model or single model object, function argument
-        #  might be better
+        biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
         fraction_reaction.add_metabolites({f_biomass_met: 1})
         biomass_rxn.add_metabolites({f_biomass_met: -1})
-        self._backup_metabolites[f"{model.id}_f_biomass_met"] = f_biomass_met
+        self._backup_metabolites[f"{member_name}_f_biomass_met"] = f_biomass_met
         # add fraction reaction to model
         model.add_reactions([fraction_reaction])
         # convert constraints of S.O.M to metabolites and add them to fraction reaction and constrained S.O.M reactions
-        self._constraint_mets = self.convert_constraints_to_metabolites(model)
+        self._constraint_mets = self.convert_constraints_to_metabolites(model, member_name)
         self.add_sink_reactions_to_metabolites(model)
-        self.add_constraint_metabolites_to_reactions(model)
-        self.reset_bounds_after_creating_fraction_reaction()
+        #self.add_constraint_metabolites_to_reactions(model) # deprecated
+        #self.reset_bounds_after_creating_fraction_reaction() # Deprecated
 
-    def convert_constraints_to_metabolites(self, model):
+    def convert_constraints_to_metabolites(self, model, member_name, inf_to_num=1000.):
+        # TODO: place a maximum flux value parameter in the model
         # create empty dictionary for constrained metabolites
         constrained_mets = {}  # keys: metabolite, values: coefficent
+        fraction_reaction_mets = {}
+        fraction_reaction = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+        exchange_rxns = model.exchanges
+
         for reaction in model.reactions:
-            if reaction not in model.exchanges and "fraction_reaction" not in reaction.id:
+            if reaction == fraction_reaction or reaction in exchange_rxns:
+                continue
+            else:
                 # create constraint metabolites
                 met_lb = cobra.Metabolite(f'{reaction.id}_lb', name=f'{reaction.id} lower bound',
                                           compartment='fraction_reaction')
@@ -696,30 +710,29 @@ class CommunityModel:
                                           compartment='fraction_reaction')
                 # add constrained metabolites to the constrained_mets dictionary
                 if reaction.lower_bound != 0:
-                    constrained_mets[met_lb] = reaction.lower_bound
+                    coefficient = -inf_to_num if reaction.lower_bound < -inf_to_num else reaction.lower_bound
+                    constrained_mets[met_lb] = coefficient
+                    fraction_reaction_mets[met_lb] = -coefficient
+                    reaction.add_metabolites({met_lb: 1})
                 if reaction.upper_bound != 0:
-                    constrained_mets[met_ub] = reaction.upper_bound
-        return constrained_mets
+                    coefficient = inf_to_num if reaction.upper_bound > inf_to_num else reaction.upper_bound
+                    constrained_mets[met_ub] = coefficient
+                    fraction_reaction_mets[met_ub] = coefficient
+                    reaction.add_metabolites({met_ub: -1})
 
-    def add_constraint_metabolites_to_reactions(self, model):
-        fraction_reaction = None
-        # find the fraction_reaction
-        for reaction in model.reactions:
-            if "fraction_reaction" in reaction.id:
-                fraction_reaction = reaction
-        for met, coefficient in self._constraint_mets.items():
-            if '_ub' in met.id:
-                # add metabolite to the fraction_reaction
-                fraction_reaction.add_metabolites({met: coefficient})
-                # add constraint metabolite to its corresponding reaction
-                rxn = model.reactions.get_by_id(met.id[0:-3])
-                rxn.add_metabolites({met: -1})
-            elif '_lb' in met.id:
-                # add metabolite to the fraction_reaction
-                fraction_reaction.add_metabolites({met: -coefficient})
-                # add constraint metabolite to its corresponding reaction
-                rxn = model.reactions.get_by_id(met.id[0:-3])
-                rxn.add_metabolites({met: 1})
+                # Relax reaction bounds
+                if reaction.lower_bound < 0:
+                    reaction.lower_bound = -inf_to_num
+                else:
+                    reaction.lower_bound = 0
+                if reaction.upper_bound <= 0:
+                    reaction.upper_bound = 0
+                else:
+                    reaction.upper_bound = inf_to_num
+
+        # Add fraction metabolites to the fraction reaction
+        fraction_reaction.add_metabolites(fraction_reaction_mets)
+        return constrained_mets
 
     def add_sink_reactions_to_metabolites(self, model, lb=0., inplace=True):
         if not inplace:
@@ -753,9 +766,7 @@ class CommunityModel:
         if model is None:
             model = self.community_model
         model.reactions.get_by_id("community_biomass").bounds = (flux, flux)
-        counter = 0
-        # TODO: update to iterate over member names and target reaction and metabolite directly, remove backup
-        #  metabolites
+
         for member_name in self.get_member_names():
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
@@ -766,19 +777,6 @@ class CommunityModel:
                 fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
 
         model.repair()
-
-    def reset_bounds_after_creating_fraction_reaction(self):
-        for met in self._constraint_mets:
-            for reaction in met.reactions:
-                if "fraction_reaction" not in reaction.id and met.id not in reaction.id:
-                    if reaction.lower_bound < 0:
-                        reaction.lower_bound = -1000
-                    else:
-                        reaction.lower_bound = 0
-                    if reaction.upper_bound <= 0:
-                        reaction.upper_bound = 0
-                    else:
-                        reaction.upper_bound = 1000
 
     def _add_fixed_abundance_reaction(self, model):
         # add an abundance reaction to the model for fixed abundance model structure (used later)
@@ -917,71 +915,6 @@ class CommunityModel:
 
         return
 
-    def apply_abundance(self, abd_dict):
-        # TODO: deprecated
-        # Check if organism names are in the model
-        try:
-            assert all([name in self.get_member_names() for name in abd_dict.keys()])
-        except AssertionError:
-            print(f"Error: Some names in the abundances are not part of the model.")
-            print(f"\tAbundances: {abd_dict.keys()}")
-            print(f"\tOrganisms in model: {self.get_member_names()}")
-            raise AssertionError
-
-        # Check that abundances sum to 1
-        try:
-            assert np.isclose([sum(abd_dict.values())], [1.])
-        except AssertionError:
-            print(f"Warning: Abundances do not sum up to 1. Correction will be applied")
-            if sum(abd_dict.values()) == 0.:
-                print(f"Error: The sum of abundances is 0")
-                raise ValueError
-            correction_factor = 1 / sum(abd_dict.values())
-            for name, abundance in abd_dict.items():
-                abd_dict[name] = abundance * correction_factor
-            print(f"Correction applied. New abundances are:\n{abd_dict}")
-            assert np.isclose([sum(abd_dict.values())], [1.])
-
-        # Extend abundances to include all organisms of model
-        for name in self.get_member_names():
-            if name not in abd_dict.keys():
-                abd_dict[name] = 0.
-
-        # Apply abundances to model
-        abd_model = self.unconstrained_model.copy()
-        for rxn in abd_model.reactions:
-            for name in self.get_member_names():
-                if rxn.id.find(name) == 0:
-                    rxn.lower_bound *= float(abd_dict[name])
-                    rxn.upper_bound *= float(abd_dict[name])
-
-        # Change biomass reaction
-        biomass_rxn = abd_model.reactions.get_by_id("community_biomass")
-        stoichiometry = biomass_rxn.metabolites
-        for met, value in stoichiometry.items():
-            if value > 0:
-                continue
-            else:
-                for name in self.get_member_names():
-                    if met.id.find(name) == 0:
-                        stoichiometry[met] = -float(abd_dict[name])
-        biomass_rxn.add_metabolites(stoichiometry, combine=False)
-
-        self._community_model = abd_model
-        self.abundance_flag = True
-        self._abundance_dict = abd_dict
-        if self.medium_flag:
-            self.apply_medium()
-        return abd_model
-
-    def equal_abundance(self):
-        # TODO: deprecated
-        abundances = {}
-        names = self.get_member_names()
-        for name in names:
-            abundances[name] = 1. / len(names)
-        return self.apply_abundance(abundances)
-
     def generate_equal_abundance_dict(self):
         abundances = {}
         names = self.get_member_names()
@@ -996,7 +929,7 @@ class CommunityModel:
 
     def apply_medium(self):
         test_if_medium_exists = self.medium
-        medium_model = self.community_model.copy()
+        medium_model = self.community_model
         # Exclude metabolites from the medium that are not part of the model
         medium_refined = {}
         for rxn in self.medium.keys():
@@ -1033,33 +966,27 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def _run_fva_with_no_medium(self, composition_agnostic=False, loopless=False):
+    def _run_fva_with_no_medium_for_loops(self, composition_agnostic=False, loopless=False):
         """This function is only used for finding loops. It converts the model to fixed growth rate of 0 if
         composition agnostic is wished. All changes are reverted."""
         fraction_of_optimum = 0.
         model = self.community_model
         model.medium = {}
+        non_fraction_reactions = model.reactions.query(lambda x: "fraction_reaction" not in x.id and not (
+                x.id[:3] == "SK_" and x.id[-3:] in ["_ub", "_lb"]))
 
         if composition_agnostic:
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
                 self.apply_fixed_growth_rate(0.)
-                solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
-                                                                            self.community_model.reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                            loopless=loopless)
+                solution_df = find_loops_in_model(model)
                 self.apply_fixed_growth_rate(mu_c)
             else:
                 self.convert_to_fixed_growth_rate(mu_c=0.)
-                solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
-                                                                            self.community_model.reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                            loopless=loopless)
+                solution_df = find_loops_in_model(model)
                 self.convert_to_fixed_abundance()
         else:
-            solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model, self.community_model.reactions,
-                                                                        fraction_of_optimum=fraction_of_optimum,
-                                                                        loopless=loopless)
+            solution_df = solution_df = find_loops_in_model(model)
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
@@ -1206,8 +1133,9 @@ class CommunityModel:
                                                                   composition_agnostic=True)
         return self.format_exchg_rxns(exchange_fva_df)
 
-    def report(self, verbose=True):
+    def report(self, verbose=True, max_reactions=5000):
         report_dict = {}
+        model_structure = "fixed growth rate" if self.fixed_growth_rate_flag else "fixed abundance"
         num_metabolites = len(self.community_model.metabolites)
         num_f_metabolites = len(self.f_metabolites)
         num_model_metabolites = num_metabolites - num_f_metabolites
@@ -1221,9 +1149,17 @@ class CommunityModel:
         objective_direction = self.community_model.objective.direction
         unbalanced_reactions = self.get_unbalanced_reactions()
         num_unbalanced_reactions = len(unbalanced_reactions)
-        reactions_in_loops = self.get_loops()
-        num_loop_reactions = len(reactions_in_loops)
+
+        reactions_in_loops = "NaN"
+        num_loop_reactions = "NaN"
+        if num_model_reactions <= max_reactions:
+            reactions_in_loops = self.get_loops()
+            num_loop_reactions = len(reactions_in_loops)
+        else:
+            print(f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
+                  f"would take some time. If needed, please run manually via .get_loops()")
         report_dict = {"community_name": self.name,
+                       "model_structure": model_structure,
                        "num_metabolites": num_metabolites,
                        "num_f_metabolites": num_f_metabolites,
                        "num_model_metabolites": num_model_metabolites,
@@ -1244,6 +1180,7 @@ class CommunityModel:
             print(f"Name: {self.name}")
             print("------------------")
             print("Model overview")
+            print(f"Model structure: {model_structure}")
             print(f"# Metabolites: {num_metabolites}")
             print(f"# Constraint (f-) Metabolites: {num_f_metabolites}")
             print(f"# Model Metabolites: {num_model_metabolites}")
