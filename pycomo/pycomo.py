@@ -383,7 +383,6 @@ class CommunityModel:
     _merge_via_annotation: str = None
     _abundance_dict: dict = None
     _member_names: list = None
-    _constraint_mets: dict = None
     _backup_metabolites: dict = {}
 
     def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, **kwargs):
@@ -686,10 +685,8 @@ class CommunityModel:
         # add fraction reaction to model
         model.add_reactions([fraction_reaction])
         # convert constraints of S.O.M to metabolites and add them to fraction reaction and constrained S.O.M reactions
-        self._constraint_mets = self.convert_constraints_to_metabolites(model, member_name)
-        self.add_sink_reactions_to_metabolites(model)
-        #self.add_constraint_metabolites_to_reactions(model) # deprecated
-        #self.reset_bounds_after_creating_fraction_reaction() # Deprecated
+        constraint_mets = self.convert_constraints_to_metabolites(model, member_name)
+        self.add_sink_reactions_to_metabolites(model, constraint_mets)
 
     def convert_constraints_to_metabolites(self, model, member_name, inf_to_num=1000.):
         # TODO: place a maximum flux value parameter in the model
@@ -734,11 +731,11 @@ class CommunityModel:
         fraction_reaction.add_metabolites(fraction_reaction_mets)
         return constrained_mets
 
-    def add_sink_reactions_to_metabolites(self, model, lb=0., inplace=True):
+    def add_sink_reactions_to_metabolites(self, model, constraint_mets, lb=0., inplace=True):
         if not inplace:
             model = model.copy()
 
-        for met in self._constraint_mets:
+        for met in constraint_mets:
             model.add_boundary(met, type="sink", lb=lb, ub=100000)
 
         model.repair()
@@ -986,7 +983,7 @@ class CommunityModel:
                 solution_df = find_loops_in_model(model)
                 self.convert_to_fixed_abundance()
         else:
-            solution_df = solution_df = find_loops_in_model(model)
+            solution_df = find_loops_in_model(model)
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
