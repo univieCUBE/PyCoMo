@@ -4,7 +4,7 @@
 # # PyCoMo Basics #
 # PyCoMo is a **Py**thon **Co**mmunity metabolic **Mo**delling package. In this tutorial, the core features will be presented.
 # 
-# The expected runtime for this notebook is approximately 5 minutes.
+# The expected runtime for this notebook is approximately 10-30 minutes.
 # ## Setting up PyCoMo ##
 # Clone the package from github. Next, we are going to import all the packages we need in this tutorial.
 
@@ -30,10 +30,10 @@ import pycomo as pycomo
 
 # Now we will check if PyCoMo was loaded correctly. For this, we will run the help function on the PyCoMo package.
 
-# In[ ]:
+# In[3]:
 
 
-help(pycomo)
+#help(pycomo)
 
 
 # ## Creating a Community Model ##
@@ -108,53 +108,79 @@ com_model_obj.community_model
 # 2. _WARNING: no annotation overlap found for matching metabolite mn2. Please make sure that the metabolite with this ID is indeed representing the same substance in all models!_ This warning comes up if exchange metabolites do not contain any matching annotation field. This can be an indicator that metabolites with the same ID are merged, but they represent different chemicals. Another common cause is that no annotation was given for this metabolite in one of the models.
 # 3. _WARNING: matching of the metabolite CO2_EX is unbalanced (mass and/or charge). Please manually curate this metabolite for a mass and charge balanced model!_ This warning means that the formula of an exchange metabolite was different between member models. This can be due to the formula being omitted in some of the models. The other reason is that the metabolites differ in their mass or charge. As this would lead to generation or loss of matter from nothing, these issues need to be resolved for a consistent metabolic model.
 
-# ### Setting the community member composition ###
-# For the bounds of the model and the normalisation to be correct, the fractions of all community members must be set (and sum up to 1.0). A quick way to do this is to set the abundance fractions equal for all community members.
+# ### Summary and report ###
+# The community model object has two utility methods to display information on the model. 
+# - Summary behaves the same as the summary method of COBRApy, displaying the the solution of FBA and its exchange metabolites. In the CommunityModel summary, the exchange reactions of metabolites responsible for scaling the flux bounds to the community composition are hidden.
+# - The report function displays information on the model structure: the number of metabolites, reactions, genes, etc., but also quality control measures on mass and charge balance and internal loops.
 
 # In[10]:
 
 
-com_model_obj.equal_abundance()
+com_model_obj.summary()
 
-
-# Now let us check if the biomass function was updated accordingly as well
 
 # In[11]:
 
 
-com_model_obj.community_model.reactions.get_by_id("community_biomass").reaction
+com_model_obj.report()
 
 
-# As can be seen above, the biomass function now takes an equal amount of all 17 community members, 1/17th or 0.0588...
-
-# ### Quality Checks ###
-# One of the quality checks that should be done is to look into all unbalanced reactions (mass and charge) in the entire model. As said before, such reactions should only exist in the case of boundary reactions, such as exchange, sink and source reactions.
+# ### Setting the growth rate ###
+# By default the community model object will have the structure of fixe growth rate. This means, the fractions of the community member abundance is allowed to vary during simulations, but the individual and community growth rate is set to a fixed value (default: 1.0). The next thing we will try is to set the community growth rate to a different value and do a FBA.
 
 # In[12]:
 
 
-com_model_obj.get_unbalanced_reactions()
+com_model_obj.apply_fixed_growth_rate(0.5)
+com_model_obj.summary()
+
+
+# ### Setting the community member composition ###
+# The model structure can be changed to fixed abundance, but variable growth rate. To do so, a conversion function needs to be called. Here we then change the community abundance to equal abundances.
+
+# In[13]:
+
+
+com_model_obj.convert_to_fixed_abundance()
+abundance_dict = com_model_obj.generate_equal_abundance_dict()
+com_model_obj.apply_fixed_abundance(abundance_dict)
+com_model_obj.summary()
 
 
 # ## Saving and loading community models ##
 # Community model objects can be saved and loaded into SBML files. This is different from the other available option to save the cobra model of the community model objects, as the abundance fractions of the organisms are written into the file as well. Saving and loading the community model can be done like this:
 
-# In[13]:
+# In[14]:
 
 
 com_model_obj.save("../data/toy/output/henson_com_model.xml")
 
 
-# In[14]:
+# In[15]:
 
 
 com_model_obj_loaded = pycomo.CommunityModel.load("../data/toy/output/henson_com_model.xml")
 
 
-# In[15]:
+# In[16]:
 
 
-com_model_obj_loaded.community_model.summary()
+com_model_obj_loaded
+
+
+# In[17]:
+
+
+com_model_obj_loaded.community_model.optimize()
+
+
+# ### Quality Checks ###
+# One of the quality checks that should be done is to look into all unbalanced reactions (mass and charge) in the entire model. As said before, such reactions should only exist in the case of boundary reactions, such as exchange, sink and source reactions.
+
+# In[18]:
+
+
+com_model_obj.get_unbalanced_reactions()
 
 
 # ## Analysis of community models ##
@@ -162,20 +188,20 @@ com_model_obj_loaded.community_model.summary()
 # ### Creating the community model ###
 # We repeat the steps as before.
 
-# In[16]:
+# In[19]:
 
 
 test_model_dir = "../data/use_case/koch"
 named_models = pycomo.load_named_models_from_dir(test_model_dir)
 
 
-# In[17]:
+# In[20]:
 
 
 named_models
 
 
-# In[18]:
+# In[21]:
 
 
 single_org_models = []
@@ -189,7 +215,7 @@ com_model_obj = pycomo.CommunityModel(single_org_models, community_name)
 
 # With the community model generated, we set the medium for the analysis, as done by Koch et al.
 
-# In[19]:
+# In[22]:
 
 
 medium = {
@@ -208,7 +234,7 @@ com_model_obj.community_model.reactions.get_by_id("EX_H2_EX_exchg").upper_bound 
 # ### Calculating potential metabolite exchange ###
 # All potential exchange metabolite fluxes and cross-feeding interactions can be calculated with the _potential_metabolite_exchanges_ method. This is a single FVA, but with a minimum objective of 0 and relaxed constraints. All reaction constraints are changed to include the value 0, which circumvents cases where a specific flux through a reaction is required, leading to infeasible solutions for certain community compositions.
 
-# In[20]:
+# In[23]:
 
 
 com_model_obj.potential_metabolite_exchanges()
@@ -216,22 +242,23 @@ com_model_obj.potential_metabolite_exchanges()
 
 # ### Plotting the maxiumum growth rate over the composition space ###
 
-# In[ ]:
+# In[24]:
 
 
 import pandas as pd
 
 # Iterate over the fractions in steps of 0.01
+com_model_obj.convert_to_fixed_abundance()
 rows = []
-for i in range (1,100,1):  # fraction of D. vulgaris
-    for j in range (1, 100-i, 1): # fraction of M. hungatei
+for i in range (0,100,1):  # fraction of D. vulgaris
+    for j in range (0, 100-i, 1): # fraction of M. hungatei
         if (100-i-j) < 0:
             continue
 
         abundances = {"dv": i/100., "mh": j/100., "mb": (100-i-j)/100.}
         
         # Apply the abuyndances
-        com_model_obj.apply_abundance(abundances)
+        com_model_obj.apply_fixed_abundance(abundances)
         
         # Reapply the bound restrictions of the exchange reactions
         com_model_obj.community_model.reactions.get_by_id("EX_Form_EX_exchg").upper_bound = 0.
@@ -245,7 +272,7 @@ for i in range (1,100,1):  # fraction of D. vulgaris
 growth_df = pd.DataFrame(rows)
 
 
-# In[23]:
+# In[25]:
 
 
 import matplotlib.pyplot as plt
