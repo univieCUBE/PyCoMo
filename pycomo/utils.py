@@ -326,6 +326,16 @@ def find_loops_in_model(model):
     loop_model = model.copy()
     loop_model.medium = {}
     relax_reaction_constraints_for_zero_flux(loop_model)
-    solution_df = cobra.flux_analysis.flux_variability_analysis(loop_model, loop_model.reactions,
-                                                                fraction_of_optimum=0., loopless=False)
-    return solution_df
+    no_medium = {}
+    max_flux_value = 1000.0
+    loops = []
+    for rxn in loop_model.reactions:
+        loop_model.objective = rxn.id
+        solution = loop_model.optimize("minimize")
+        min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+        solution = loop_model.optimize("maximize")
+        max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+        if min_flux != 0. or max_flux != 0.:
+            loops.append({"reaction": rxn.id, "min_flux": min_flux, "max_flux": max_flux})
+    loops_df = pd.DataFrame(loops)
+    return loops_df

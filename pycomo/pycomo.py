@@ -551,8 +551,7 @@ class CommunityModel:
         no_medium = {}
         self.community_model.medium = no_medium
 
-        solution_df = self._run_fva_with_no_medium_for_loops(composition_agnostic=True,
-                                                             loopless=False)
+        solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites())
 
         self.community_model.medium = original_medium
         return solution_df[
@@ -918,6 +917,46 @@ class CommunityModel:
         for name in names:
             abundances[name] = 1. / len(names)
         return abundances
+
+    def convert_to_model_without_fraction_metabolites(self):
+        was_fixed_growth = False
+        if self.fixed_growth_rate_flag:
+            was_fixed_growth = True
+            self.convert_to_fixed_abundance()
+
+        model = self.community_model.copy()
+
+        if was_fixed_growth:
+            self.convert_to_fixed_growth_rate()
+
+        reactions_to_remove = [model.reactions.get_by_id("f_final")]
+
+        for reaction in model.reactions:
+            if "fraction_reaction" in reaction.id:
+                reactions_to_remove.append(reaction)
+                for metabolite, coeff in reaction.metabolites.items():
+                    if "_lb" == metabolite.id[-3:]:
+                        rxn = model.reactions.get_by_id(metabolite.id[:-3])
+                        rxn.lower_bound = -coeff
+                        rxn.add_metabolites({metabolite: 0}, combine=False)
+                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        metabolite.remove_from_model(True)
+                    elif "_ub" == metabolite.id[-3:]:
+                        rxn = model.reactions.get_by_id(metabolite.id[:-3])
+                        rxn.upper_bound = coeff
+                        rxn.add_metabolites({metabolite: 0}, combine=False)
+                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        metabolite.remove_from_model(True)
+                    elif "_f_biomass_met" in metabolite.id:
+                        rxn = model.reactions.get_by_id(metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
+                        rxn.add_metabolites({metabolite: 0}, combine=False)
+                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        metabolite.remove_from_model(True)
+
+        for reaction in reactions_to_remove:
+            reaction.remove_from_model(remove_orphans=True)
+
+        return model
 
     def load_medium_from_file(self, file_path):
         # load the medium dictionary
