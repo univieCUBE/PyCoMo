@@ -57,6 +57,21 @@ def read_medium_from_file(file, comp="_exchg"):
     return medium_dict
 
 
+def read_abundance_from_file(file):
+    endings = {"sbml", "json", "mat"}
+    abd_df = pd.read_csv(file, sep=",")
+    abd_dict = {}
+    assert len(abd_df.columns) == 2
+    abd_df.columns = ["model", "fraction"]
+    for idx, row in abd_df.iterrows():
+        model = row["model"]
+        if str(os.path.splitext(model)[1]) in endings:
+            model = model.replace(str(os.path.splitext(file)[1]), "")
+        fraction = float(row["fraction"])
+        abd_dict[model] = fraction
+    return abd_dict
+
+
 def load_named_model(file, format="sbml"):
     name = os.path.split(file)[1].replace(str(os.path.splitext(file)[1]), "")
     if format == "sbml":

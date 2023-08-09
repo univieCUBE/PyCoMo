@@ -525,6 +525,8 @@ class CommunityModel:
                 conversion_dict[old_name] = new_name
         else:
             print("Warning: There are no member models in the community model object.")
+            for member_name in self.get_member_names():
+                conversion_dict[member_name] = member_name
         return conversion_dict
 
     def get_member_names(self):
@@ -918,6 +920,12 @@ class CommunityModel:
             abundances[name] = 1. / len(names)
         return abundances
 
+    def equal_abundance(self):
+        if not self.fixed_abundance_flag:
+            self.convert_to_fixed_abundance()
+        abundances = self.generate_equal_abundance_dict()
+        self.apply_fixed_abundance(abundances)
+
     def convert_to_model_without_fraction_metabolites(self):
         was_fixed_growth = False
         if self.fixed_growth_rate_flag:
@@ -1164,10 +1172,13 @@ class CommunityModel:
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self):
-        exchange_fva_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=0.,
-                                                                  composition_agnostic=True)
-        return self.format_exchg_rxns(exchange_fva_df)
+    def potential_metabolite_exchanges(self, fba=False):
+        if fba:
+            exchange_df = self.cross_feeding_metabolites_from_fba(unconstrained=False)
+        else:
+            exchange_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=0.,
+                                                                      composition_agnostic=True)
+        return self.format_exchg_rxns(exchange_df)
 
     def report(self, verbose=True, max_reactions=5000):
         report_dict = {}
@@ -1288,67 +1299,102 @@ class CommunityModel:
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
 
-def doall(model_folder="", models=[], community_name="community_model", abundance="equal", medium=None,
+def doall(model_folder="", models=None, com_model=None, out_dir="", community_name="community_model",
+          fixed_growth_rate=None, abundance="equal", medium=None,
           fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
-          fva_interaction_path=None, fva_interaction_threshold=0.9, sbml_output_path=None, return_as_cobra_model=False,
+          fva_interaction_path=None, sbml_output_file=None, return_as_cobra_model=False,
           merge_via_annotation=None):
-    # Load singel organism models
-    # Either from folder or as list of file names or list of cobra models
-    if model_folder != "":
-        named_models = load_named_models_from_dir(model_folder)
-    elif not isinstance(models, list) or len(models) == 0:
-        raise ValueError(f"No models supplied to the doall function. Please supply either a path to the folder "
-                         f"containing the models to the model_folder variable or a list of filepaths or cobra models "
-                         f"to the models variable.")
-    elif all(list(map(lambda x: isinstance(x, cobra.Model), models))):
-        # Extract names and store in named models
-        named_models = {model.name: model for model in models}
-    elif all(list(map(lambda x: isinstance(x, cobra.Model), models))):
-        named_models = {}
-        for model_path in models:
-            model, name = load_named_model(model_path)
-            named_models[name] = model
+    com_model_obj = None
+    if com_model is not None:
+        # Load community model
+        com_model_obj = CommunityModel.load(com_model)
     else:
-        raise TypeError(f"Input models are either of mixed type or neither filepath, nor cobra model.")
+        # Load single organism models
+        # Either from folder or as list of file names or list of cobra models
+        if model_folder != "":
+            named_models = load_named_models_from_dir(model_folder)
+        elif not isinstance(models, list) or len(models) == 0:
+            raise ValueError(f"No models supplied to the doall function. Please supply either a path to the folder "
+                             f"containing the models to the model_folder variable or a list of filepaths or cobra "
+                             f"models"
+                             f"to the models variable.")
+        elif all(list(map(lambda x: isinstance(x, cobra.Model), models))):
+            # Extract names and store in named models
+            named_models = {model.name: model for model in models}
+        elif all(list(map(lambda x: isinstance(x, cobra.Model), models))):
+            named_models = {}
+            for model_path in models:
+                model, name = load_named_model(model_path)
+                named_models[name] = model
+        else:
+            raise TypeError(f"Input models are either of mixed type or neither filepath, nor cobra model.")
 
-    # Create single organism models
-    single_org_models = [SingleOrganismModel(model, name) for name, model in named_models.items()]
+        # Create single organism models
+        single_org_models = [SingleOrganismModel(model, name) for name, model in named_models.items()]
 
-    # Create a community model
-    com_model_obj = CommunityModel(single_org_models, community_name, merge_via_annotation=merge_via_annotation)
-    com_model_obj.generate_community_model()
+        # Create a community model
+        com_model_obj = CommunityModel(single_org_models, community_name, merge_via_annotation=merge_via_annotation)
+        com_model_obj.generate_community_model()
 
-    # Apply abundance (either None, "equal", or an abundance dict
-    if abundance == "equal":
-        com_model_obj.equal_abundance()
-    elif isinstance(abundance, dict):
-        name_conversion = com_model_obj.generate_member_name_conversion_dict()
-        tmp_abundance = {}
-        for name, fraction in abundance:
-            tmp_abundance[name_conversion[name]] = fraction
-        com_model_obj.apply_abundance(tmp_abundance)
+    if fixed_growth_rate is None:
+        # Apply abundance (either None, "equal", or an abundance dict)
+        if abundance == "equal":
+            com_model_obj.equal_abundance()
+        elif isinstance(abundance, dict):
+            name_conversion = com_model_obj.generate_member_name_conversion_dict()
+            tmp_abundance = {}
+            for name, fraction in abundance:
+                tmp_abundance[name_conversion[name]] = fraction
+            com_model_obj.convert_to_fixed_abundance()
+            com_model_obj.apply_fixed_abundance(tmp_abundance)
+        else:
+            com_model_obj.convert_to_fixed_abundance()
     else:
-        pass  # No abundance to apply
+        if fixed_growth_rate < 0.:
+            print(f"Error: Specified growth rate is negative ({fixed_growth_rate}). PyCoMo will continue with a "
+                  f"growth rate set to 0.")
+            fixed_growth_rate = 0.
+        com_model_obj.convert_to_fixed_growth_rate()
+        com_model_obj.apply_fixed_growth_rate(fixed_growth_rate)
 
     # Apply medium
     if medium is not None:
         com_model_obj.load_medium_from_file(medium)
         com_model_obj.apply_medium()
 
-    if sbml_output_path is not None:
-        cobra.io.write_sbml_model(com_model_obj.community_model, filename=sbml_output_path)
+    if sbml_output_file is not None:
+        com_model_obj.save(os.path.join(out_dir, sbml_output_file))
 
     if fba_solution_path is not None:
         try:
-            com_model_obj.fba_solution_flux_vector(file_path=fba_solution_path)
+            com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_path))
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
 
     if fva_solution_path is not None:
         try:
-            com_model_obj.fva_solution_flux_vector(file_path=fva_solution_path, fraction_of_optimum=0.0)
+            com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_path),
+                                                   fraction_of_optimum=fva_solution_threshold)
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
+
+    if fva_interaction_path is not None:
+        try:
+            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False)
+            print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
+            interaction_df.to_csv(file_path=os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
+                                  index=False, float_format='%f')
+        except cobra.exceptions.Infeasible:
+            print(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
+
+    if fba_interaction_path is not None:
+        try:
+            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=True)
+            print(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_path)}")
+            interaction_df.to_csv(file_path=os.path.join(out_dir, fba_interaction_path), sep="\t", header=True,
+                                  index=False, float_format='%f')
+        except cobra.exceptions.Infeasible:
+            print(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
 
     if return_as_cobra_model:
         # Retrieve community model
@@ -1368,20 +1414,30 @@ if __name__ == "__main__":
     print(args)
     if args.abundance is not None and args.abundance != "equal":
         # Retrieve the abundance from file
-        pass
-    if len(args.input) == 1 and os.path.isdir(args.input[0]):
-        doall(model_folder=args.input[0], community_name=args.name, abundance=args.abundance, medium=args.medium,
+        args.abundance = read_abundance_from_file(args.abundance)
+
+    if args.is_community:
+        doall(com_model=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+              medium=args.medium,
               fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
-              fva_interaction_path=args.fva_interaction_path, fva_interaction_threshold=args.fva_interaction,
-              sbml_output_path=args.sbml_output_path, return_as_cobra_model=False,
+              fva_interaction_path=args.fva_interaction_path,
+              sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
+              merge_via_annotation=args.match_via_annotation)
+
+    elif len(args.input) == 1 and os.path.isdir(args.input[0]):
+        doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance, medium=args.medium,
+              fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
+              fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
+              fva_interaction_path=args.fva_interaction_path,
+              sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation)
     else:
-        doall(models=args.input, community_name=args.name, abundance=args.abundance, medium=args.medium,
+        doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance, medium=args.medium,
               fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
-              fva_interaction_path=args.fva_interaction_path, fva_interaction_threshold=args.fva_interaction,
-              sbml_output_path=args.sbml_output_path, return_as_cobra_model=False,
+              fva_interaction_path=args.fva_interaction_path,
+              sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation)
 
     print("All done!")
