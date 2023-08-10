@@ -58,7 +58,7 @@ def read_medium_from_file(file, comp="_exchg"):
 
 
 def read_abundance_from_file(file):
-    endings = {"sbml", "json", "mat"}
+    endings = {"sbml", "json", "mat", "yaml", "yml"}
     abd_df = pd.read_csv(file, sep=",")
     abd_dict = {}
     assert len(abd_df.columns) == 2
@@ -80,18 +80,20 @@ def load_named_model(file, format="sbml"):
         model = cobra.io.load_json_model(file)
     elif format == "mat":
         model = cobra.io.load_matlab_model(file)
+    elif format in ["yaml", "yml"]:
+        model = cobra.io.load_yaml_model(file)
     else:
         raise ValueError(f"Incorrect format for model. Please use either sbml or json.")
     return model, name
 
 
 def load_named_models_from_dir(path, format="sbml"):
-    endings = {"sbml": ".xml", "json": ".json", "mat": ".mat"}
+    endings = {"sbml": [".xml"], "json": [".json"], "mat": [".mat"], "yaml": [".yaml", ".yml"]}
     named_models = {}
     files = os.listdir(path)
     expected_ending = endings[format]
     for file in files:
-        if not os.path.isfile(os.path.join(path, file)) or expected_ending not in file:
+        if not os.path.isfile(os.path.join(path, file)) or str(os.path.splitext(file)[1]) not in expected_ending:
             continue
         else:
             model, name = load_named_model(os.path.join(path, file), format=format)
