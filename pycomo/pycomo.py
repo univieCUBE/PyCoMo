@@ -789,7 +789,7 @@ class CommunityModel:
 
         abd_rxn.add_metabolites(abd_rxn_mets)
 
-        model.add_reaction(abd_rxn)
+        model.add_reactions([abd_rxn])
 
     def convert_to_fixed_abundance(self, abundance_dict=None):
         """This function changes the model structure to fixed abundance, but variable growth rate. The model is left
@@ -1037,25 +1037,31 @@ class CommunityModel:
 
         return solution_df
 
-    def run_fva(self, unconstrained=False, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False):
+    def run_fva(self, unconstrained=False, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None):
         if unconstrained:
             model = self.unconstrained_model
         else:
             model = self.community_model
+
+        if fva_mu_c is None and composition_agnostic:
+            fva_mu_c = 0.
+        elif fva_mu_c is not None:
+            fraction_of_optimum = 1.
+
 
         reactions = model.reactions.query(lambda x: any([met.compartment == "exchg" for met in x.metabolites.keys()]))
 
         if composition_agnostic:
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
-                self.apply_fixed_growth_rate(0.)
+                self.apply_fixed_growth_rate(fva_mu_c)
                 solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
                                                                             reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
                 self.apply_fixed_growth_rate(mu_c)
             else:
-                self.convert_to_fixed_growth_rate(mu_c=0.)
+                self.convert_to_fixed_growth_rate(mu_c=fva_mu_c)
                 solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
                                                                             reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
@@ -1114,14 +1120,14 @@ class CommunityModel:
         return exchg_metabolite_df
 
     def cross_feeding_metabolites_from_fva(self, unconstrained=False, fraction_of_optimum=0.,
-                                           composition_agnostic=False):
+                                           composition_agnostic=False, fva_mu_c=None):
         if unconstrained:
             model = self.unconstrained_model
         else:
             model = self.community_model
 
         solution_df = self.run_fva(unconstrained=unconstrained, fraction_of_optimum=fraction_of_optimum,
-                                   composition_agnostic=composition_agnostic)
+                                   composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c)
         rows = []
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == "exchg")
         member_names = self.get_member_names()
@@ -1172,12 +1178,12 @@ class CommunityModel:
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self, fba=False):
+    def potential_metabolite_exchanges(self, fba=False, fva_mu_c=0.):
         if fba:
             exchange_df = self.cross_feeding_metabolites_from_fba(unconstrained=False)
         else:
-            exchange_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=0.,
-                                                                      composition_agnostic=True)
+            exchange_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=1.,
+                                                                  fva_mu_c=fva_mu_c, composition_agnostic=True)
         return self.format_exchg_rxns(exchange_df)
 
     def report(self, verbose=True, max_reactions=5000):
