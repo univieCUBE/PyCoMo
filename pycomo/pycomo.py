@@ -375,6 +375,7 @@ class CommunityModel:
     mu_c: float = 1.
     fixed_abundance_flag: bool = False
     fixed_growth_rate_flag: bool = False
+    max_flux: float = 1000.
     _f_metabolites: list = None
     _f_reactions: list = None
     _unconstrained_model: cobra.Model = None
@@ -385,7 +386,7 @@ class CommunityModel:
     _member_names: list = None
     _backup_metabolites: dict = {}
 
-    def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, **kwargs):
+    def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, max_flux=1000., **kwargs):
         self.models = models
         self.fraction_reaction_flag = fraction_flag
         self.mu_c = mu_c
@@ -403,6 +404,13 @@ class CommunityModel:
             raise AssertionError(f"Some model names are contained in others!")
 
         self._member_names = model_names
+
+        if max_flux > 0.:
+            self.max_flux = max_flux
+        else:
+            print(f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
+                  f"instead.")
+            self.max_flux = 1000.
 
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
@@ -689,7 +697,7 @@ class CommunityModel:
         constraint_mets = self.convert_constraints_to_metabolites(model, member_name)
         self.add_sink_reactions_to_metabolites(model, constraint_mets)
 
-    def convert_constraints_to_metabolites(self, model, member_name, inf_to_num=1000.):
+    def convert_constraints_to_metabolites(self, model, member_name):
         # TODO: place a maximum flux value parameter in the model
         # create empty dictionary for constrained metabolites
         constrained_mets = {}  # keys: metabolite, values: coefficent
@@ -708,36 +716,41 @@ class CommunityModel:
                                           compartment='fraction_reaction')
                 # add constrained metabolites to the constrained_mets dictionary
                 if reaction.lower_bound != 0:
-                    coefficient = -inf_to_num if reaction.lower_bound < -inf_to_num else reaction.lower_bound
+                    coefficient = -self.max_flux if reaction.lower_bound < -self.max_flux else reaction.lower_bound
                     constrained_mets[met_lb] = coefficient
                     fraction_reaction_mets[met_lb] = -coefficient
                     reaction.add_metabolites({met_lb: 1})
                 if reaction.upper_bound != 0:
-                    coefficient = inf_to_num if reaction.upper_bound > inf_to_num else reaction.upper_bound
+                    coefficient = self.max_flux if reaction.upper_bound > self.max_flux else reaction.upper_bound
                     constrained_mets[met_ub] = coefficient
                     fraction_reaction_mets[met_ub] = coefficient
                     reaction.add_metabolites({met_ub: -1})
 
                 # Relax reaction bounds
                 if reaction.lower_bound < 0:
-                    reaction.lower_bound = -inf_to_num
+                    reaction.lower_bound = -self.max_flux
                 else:
                     reaction.lower_bound = 0
                 if reaction.upper_bound <= 0:
                     reaction.upper_bound = 0
                 else:
-                    reaction.upper_bound = inf_to_num
+                    reaction.upper_bound = self.max_flux
 
         # Add fraction metabolites to the fraction reaction
         fraction_reaction.add_metabolites(fraction_reaction_mets)
         return constrained_mets
 
     def add_sink_reactions_to_metabolites(self, model, constraint_mets, lb=0., inplace=True):
+        sink_max_flux = 1000000
+
+        if sink_max_flux < 10*self.max_flux:
+            sink_max_flux = 10*self.max_flux
+
         if not inplace:
             model = model.copy()
 
         for met in constraint_mets:
-            model.add_boundary(met, type="sink", lb=lb, ub=100000)
+            model.add_boundary(met, type="sink", lb=lb, ub=sink_max_flux)
 
         model.repair()
 
@@ -807,10 +820,10 @@ class CommunityModel:
             fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
         # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
-        model.reactions.get_by_id("abundance_reaction").bounds = (0., 1000.)
+        model.reactions.get_by_id("abundance_reaction").bounds = (0., self.max_flux)
 
         # Relax the community biomass reaction constraints
-        model.reactions.get_by_id("community_biomass").bounds = (0., 1000.)
+        model.reactions.get_by_id("community_biomass").bounds = (0., self.max_flux)
 
         # Set the model structure flags correctly
         self.fixed_abundance_flag = True
