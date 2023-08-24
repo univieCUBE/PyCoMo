@@ -567,6 +567,54 @@ class CommunityModel:
         return solution_df[
             (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
 
+    def get_member_name_of_reaction(self, reaction):
+        """
+        This function will return the name of the member the reaction belongs to by extracting this information from its
+         ID.
+        """
+        if isinstance(reaction, str):
+            metabolite = self.community_model.reactions.get_by_id(reaction)
+
+        member_name = None
+
+        for name in self.get_member_names():
+            if name == reaction.id[:len(name)]:
+                member_name = name
+                break
+
+        return member_name
+
+    def get_member_name_of_metabolite(self, metabolite):
+        """
+        This function will return the name of the member the metabolite belongs to by extracting this information from
+        its ID.
+        """
+        if isinstance(metabolite, str):
+            metabolite = self.community_model.metabolites.get_by_id(metabolite)
+
+        member_name = None
+
+        for name in self.get_member_names():
+            if name == metabolite.id[:len(name)]:
+                member_name = name
+                break
+
+        return member_name
+
+    def get_member_name_of_compartment(self, compartment):
+        """
+        This function will return the name of the member the compartment belongs to by extracting this information from
+        its ID.
+        """
+        member_name = None
+
+        for name in self.get_member_names():
+            if name == compartment[:len(name)]:
+                member_name = name
+                break
+
+        return member_name
+
     def generate_community_model(self):
         merged_model = None
         biomass_mets = {}
@@ -698,7 +746,6 @@ class CommunityModel:
         self.add_sink_reactions_to_metabolites(model, constraint_mets)
 
     def convert_constraints_to_metabolites(self, model, member_name):
-        # TODO: place a maximum flux value parameter in the model
         # create empty dictionary for constrained metabolites
         constrained_mets = {}  # keys: metabolite, values: coefficent
         fraction_reaction_mets = {}
@@ -739,6 +786,74 @@ class CommunityModel:
         # Add fraction metabolites to the fraction reaction
         fraction_reaction.add_metabolites(fraction_reaction_mets)
         return constrained_mets
+
+    def change_reaction_bounds(self, reaction: str or cobra.Reaction, lower_bound, upper_bound):
+        model = self.community_model
+
+        if isinstance(reaction, str):
+            reaction = model.reactions.get_by_id(reaction)
+
+        # Is reaction part of a community member?
+        member_name = self.get_member_name_of_reaction(reaction)
+
+        if member_name is None:
+            # No scaling to do
+            reaction.bounds = (lower_bound, upper_bound)
+            return
+
+        # Add new fraction metabolites
+        # create empty dictionary for constrained metabolites
+        metabolites_needing_sink_reactions = []
+        fraction_reaction_mets = {}
+        fraction_reaction = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+
+        # get or create constraint metabolites
+        if model.metabolites.has_id(f'{reaction.id}_lb'):
+            met_lb = model.metabolites.get_by_id(f'{reaction.id}_lb')
+        else:
+            met_lb = cobra.Metabolite(f'{reaction.id}_lb', name=f'{reaction.id} lower bound',
+                                      compartment='fraction_reaction')
+            metabolites_needing_sink_reactions.append(met_lb)
+
+        if model.metabolites.has_id(f'{reaction.id}_ub'):
+            met_ub = model.metabolites.get_by_id(f'{reaction.id}_ub')
+        else:
+            met_ub = cobra.Metabolite(f'{reaction.id}_ub', name=f'{reaction.id} upper bound',
+                                      compartment='fraction_reaction')
+            metabolites_needing_sink_reactions.append(met_ub)
+
+        # Assign the constraint metabolites the reaction coefficients
+        if lower_bound != 0:
+            coefficient = -self.max_flux if lower_bound < -self.max_flux else lower_bound
+            fraction_reaction_mets[met_lb] = -coefficient
+            reaction.add_metabolites({met_lb: 1}, combine=False)
+        else:
+            reaction.add_metabolites({met_lb: 0}, combine=False)
+            fraction_reaction_mets[met_lb] = 0
+
+        if upper_bound != 0:
+            coefficient = self.max_flux if upper_bound > self.max_flux else upper_bound
+            fraction_reaction_mets[met_ub] = coefficient
+            reaction.add_metabolites({met_ub: -1}, combine=False)
+        else:
+            fraction_reaction_mets[met_ub] = 0
+            reaction.add_metabolites({met_ub: 0}, combine=False)
+
+        # Relax reaction bounds
+        if lower_bound < 0:
+            reaction.lower_bound = -self.max_flux
+        else:
+            reaction.lower_bound = 0
+        if upper_bound <= 0:
+            reaction.upper_bound = 0
+        else:
+            reaction.upper_bound = self.max_flux
+
+        # Add fraction metabolites to the fraction reaction
+        fraction_reaction.add_metabolites(fraction_reaction_mets, combine=False)
+
+        # Add sink reactions for fraction mets
+        self.add_sink_reactions_to_metabolites(model, metabolites_needing_sink_reactions)
 
     def add_sink_reactions_to_metabolites(self, model, constraint_mets, lb=0., inplace=True):
         sink_max_flux = 1000000
