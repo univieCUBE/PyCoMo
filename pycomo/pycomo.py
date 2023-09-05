@@ -29,10 +29,11 @@ class SingleOrganismModel:
     biomass_met: cobra.Metabolite = None
     biomass_met_id: str = None
     prepared_model: cobra.Model = None
+    shared_compartment_name = None
     _name_via_annotation: str = None
     _exchange_met_name_conversion: dict = {}
 
-    def __init__(self, model, name, biomass_met_id="", name_via_annotation=None):
+    def __init__(self, model, name, biomass_met_id="", name_via_annotation=None, shared_compartment_name="medium"):
         self.model = model.copy()
         self._original_name = name
         self.name = make_string_sbml_id_compatible(name, remove_ascii_escapes=True)
@@ -40,6 +41,7 @@ class SingleOrganismModel:
             print(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         self.biomass_met_id = biomass_met_id
         self._name_via_annotation = name_via_annotation
+        self.shared_compartment_name = shared_compartment_name
 
     def get_name_conversion(self):
         return self._original_name, self.name
@@ -216,7 +218,10 @@ class SingleOrganismModel:
         else:
             return model
 
-    def add_boundary_metabolites_to_exchange_compartment(self, model, new_comp="exchg", old_comp="", inplace=True):
+    def add_boundary_metabolites_to_exchange_compartment(self, model, new_comp=None, old_comp="", inplace=True):
+        if new_comp is None:
+            new_comp = self.shared_compartment_name
+
         if not inplace:
             model = model.copy()
 
@@ -273,7 +278,10 @@ class SingleOrganismModel:
 
         return model
 
-    def add_exchange_compartment(self, model, exchg_comp_name="exchg", add_missing_transports=False, inplace=True):
+    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True):
+        if exchg_comp_name is None:
+            exchg_comp_name = self.shared_compartment_name
+
         if not inplace:
             model = model.copy()
         old_exc_comp = cobra.medium.find_external_compartment(model)
@@ -341,9 +349,12 @@ class SingleOrganismModel:
                 reaction.remove_from_model(remove_orphans=True)
         return
 
-    def prepare_for_merging(self):
+    def prepare_for_merging(self, shared_compartment_name=None):
+        if shared_compartment_name is not None:
+            self.shared_compartment_name = shared_compartment_name
         self.prepared_model = self.model.copy()
-        self.biomass_met = get_model_biomass_compound(self.prepared_model, generate_if_none=True)
+        self.biomass_met = get_model_biomass_compound(self.prepared_model, self.shared_compartment_name,
+                                                      generate_if_none=True)
         self.remove_biomass_exchange_rxn(self.prepared_model)
 
         # Remove ascii escape characters from sbml ids, as they are not compatible
@@ -357,8 +368,10 @@ class SingleOrganismModel:
             rename[comp] = self.name + "_" + comp
         self.rename_compartment(self.prepared_model, rename)
         self.add_exchange_compartment(self.prepared_model, add_missing_transports=True)
-        self.prefix_metabolite_names(self.prepared_model, self.name + "_", exclude_compartment="exchg")
-        self.prefix_reaction_names(self.prepared_model, self.name + "_", exclude_compartment="exchg")
+        self.prefix_metabolite_names(self.prepared_model, self.name + "_",
+                                     exclude_compartment=self.shared_compartment_name)
+        self.prefix_reaction_names(self.prepared_model, self.name + "_",
+                                   exclude_compartment=self.shared_compartment_name)
         self.prefix_gene_names(self.prepared_model, self.name + "_")
         return self.prepared_model
 
@@ -376,6 +389,7 @@ class CommunityModel:
     fixed_abundance_flag: bool = False
     fixed_growth_rate_flag: bool = False
     max_flux: float = 1000.
+    shared_compartment_name: str = None
     _f_metabolites: list = None
     _f_reactions: list = None
     _unconstrained_model: cobra.Model = None
@@ -386,10 +400,12 @@ class CommunityModel:
     _member_names: list = None
     _backup_metabolites: dict = {}
 
-    def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, max_flux=1000., **kwargs):
+    def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., fraction_flag=True, max_flux=1000.,
+                 shared_compartment_name="medium", **kwargs):
         self.models = models
         self.fraction_reaction_flag = fraction_flag
         self.mu_c = mu_c
+        self.shared_compartment_name = shared_compartment_name
 
         if models is not None:
             model_names = [model.name for model in self.models]
@@ -433,11 +449,14 @@ class CommunityModel:
                     met = self._unconstrained_model.metabolites.get_by_id(f"{member}_f_biomass_met")
                 except KeyError:
                     met = cobra.Metabolite(f'{member}_f_biomass_met', name=f'Fraction Biomass Metabolite of {member}',
-                                         compartment='fraction_reaction')
+                                           compartment='fraction_reaction')
                 self._backup_metabolites[f"{member}_f_biomass_met"] = met
 
         if "abundance_profile" in kwargs.keys():
             self._abundance_dict = kwargs["abundance_profile"]
+
+        if "shared_compartment_name" in kwargs.keys():
+            self.shared_compartment_name = kwargs["shared_compartment_name"]
 
     @property
     def unconstrained_model(self):
@@ -622,7 +641,7 @@ class CommunityModel:
         for model in self.models:
             idx += 1
             if idx == 1:
-                merged_model = model.prepare_for_merging()
+                merged_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name)
                 biomass_met_id = model.biomass_met.id
                 biomass_met = merged_model.metabolites.get_by_id(biomass_met_id)
                 biomass_mets[model.name] = biomass_met
@@ -634,7 +653,7 @@ class CommunityModel:
                     self.create_fraction_reaction(merged_model, member_name=model.name)
 
             else:
-                extended_model = model.prepare_for_merging()
+                extended_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name)
 
                 unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model,
                                                                                              merged_model)
@@ -671,7 +690,8 @@ class CommunityModel:
 
         # old implementation of community biomass reactions
         if not self.fraction_reaction_flag:
-            biomass_met = cobra.Metabolite("cpd11416_exchg", name='Community Biomass', compartment='exchg')
+            biomass_met = cobra.Metabolite(f"cpd11416_{self.shared_compartment_name}", name='Community Biomass',
+                                           compartment=self.shared_compartment_name)
             merged_model.add_metabolites([biomass_met])
             biomass_rxn = cobra.Reaction("community_biomass")
             biomass_rxn.name = "Community Biomass Reaction"
@@ -684,8 +704,9 @@ class CommunityModel:
             biomass_rxn.add_metabolites(rxn_mets)
             merged_model.add_reactions([biomass_rxn])
 
-            cpd11416_exchg = merged_model.metabolites.get_by_id("cpd11416_exchg")
-            cpd11416_exchg_rxn = cobra.Reaction("EX_cpd11416_exchg", name="community biomass exchange")
+            cpd11416_exchg = merged_model.metabolites.get_by_id(f"cpd11416_{self.shared_compartment_name}")
+            cpd11416_exchg_rxn = cobra.Reaction(f"EX_cpd11416_{self.shared_compartment_name}",
+                                                name="community biomass exchange")
             cpd11416_exchg_rxn.lower_bound = 0.
             cpd11416_exchg_rxn.upper_bound = 1000.
             cpd11416_exchg_rxn.add_metabolites({cpd11416_exchg: -1})
@@ -693,7 +714,8 @@ class CommunityModel:
 
         # new implementation of community biomass reaction
         else:
-            biomass_met = cobra.Metabolite("cpd11416_exchg", name='Community Biomass', compartment='exchg')
+            biomass_met = cobra.Metabolite(f"cpd11416_{self.shared_compartment_name}", name='Community Biomass',
+                                           compartment=self.shared_compartment_name)
             biomass_rxn = cobra.Reaction("community_biomass")
             biomass_rxn.add_metabolites({biomass_met: -1})
             merged_model.add_reactions([biomass_rxn])
@@ -1096,7 +1118,7 @@ class CommunityModel:
 
     def load_medium_from_file(self, file_path):
         # load the medium dictionary
-        medium_dict = read_medium_from_file(file_path, comp="_exchg")
+        medium_dict = read_medium_from_file(file_path, comp=f"_{self.shared_compartment_name}")
         self.medium = medium_dict
 
     def apply_medium(self):
@@ -1176,24 +1198,62 @@ class CommunityModel:
         elif fva_mu_c is not None:
             fraction_of_optimum = 1.
 
-
-        reactions = model.reactions.query(lambda x: any([met.compartment == "exchg" for met in x.metabolites.keys()]))
+        reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
+                                                         for met in x.metabolites.keys()]))
 
         if composition_agnostic:
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
-                self.apply_fixed_growth_rate(fva_mu_c)
+                self.apply_fixed_growth_rate(0.)
+                # Allow flux through the biomass reaction
+                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
+
+                # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
+                # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
+                # discover a superset of possible metabolite exchanges.
+                f_bio_mets = {}
+                for member_name in self.get_member_names():
+                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                    fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                    f_bio_mets[member_name] = fraction_met
+                    biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+
                 solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
                                                                             reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
+
+                # Revert changes
+                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
+                for member_name, fraction_met in f_bio_mets.items():
+                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                    biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
+
                 self.apply_fixed_growth_rate(mu_c)
             else:
-                self.convert_to_fixed_growth_rate(mu_c=fva_mu_c)
+                self.convert_to_fixed_growth_rate(mu_c=0.)
+
+                # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
+                # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
+                # discover a superset of possible metabolite exchanges.
+                f_bio_mets = {}
+                for member_name in self.get_member_names():
+                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                    fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                    f_bio_mets[member_name] = fraction_met
+                    biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+
                 solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model,
                                                                             reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
+
+                # Revert changes
+                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
+                for member_name, fraction_met in f_bio_mets.items():
+                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                    biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
+
                 self.convert_to_fixed_abundance()
         else:
             solution_df = cobra.flux_analysis.flux_variability_analysis(self.community_model, reactions,
@@ -1222,7 +1282,7 @@ class CommunityModel:
         solution_df = self.run_fba(unconstrained=unconstrained)
         rows = []
 
-        exchg_metabolites = model.metabolites.query(lambda x: x.compartment == "exchg")
+        exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
         for exchg_met in exchg_metabolites:
@@ -1257,7 +1317,7 @@ class CommunityModel:
         solution_df = self.run_fva(unconstrained=unconstrained, fraction_of_optimum=fraction_of_optimum,
                                    composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c)
         rows = []
-        exchg_metabolites = model.metabolites.query(lambda x: x.compartment == "exchg")
+        exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
         for exchg_met in exchg_metabolites:
@@ -1306,9 +1366,12 @@ class CommunityModel:
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self, fba=False, fva_mu_c=0.):
+    def potential_metabolite_exchanges(self, fba=False, fva_mu_c=None):
         if fba:
             exchange_df = self.cross_feeding_metabolites_from_fba(unconstrained=False)
+        elif fva_mu_c is not None:
+            exchange_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=1.,
+                                                                  fva_mu_c=fva_mu_c, composition_agnostic=False)
         else:
             exchange_df = self.cross_feeding_metabolites_from_fva(unconstrained=False, fraction_of_optimum=1.,
                                                                   fva_mu_c=fva_mu_c, composition_agnostic=True)
@@ -1406,6 +1469,8 @@ class CommunityModel:
         create_parameter_in_sbml_model(sbml_model, "fixed_growth_rate_flag", False,
                                        value=(1 if self.fixed_growth_rate_flag else 0))
         create_parameter_in_sbml_model(sbml_model, "mu_c", False, value=self.mu_c)
+        create_parameter_in_sbml_model(sbml_model, "shared_compartment_id", True, value=self.shared_compartment_name,
+                                       as_name=True)
 
         libsbml.writeSBMLToFile(sbml_doc, file_path)
 
@@ -1418,7 +1483,7 @@ class CommunityModel:
         assert len(abundance_parameters) > 0
 
         flags_and_muc = get_flags_and_muc_from_sbml_file(file_path)
-        assert len(flags_and_muc) == 3
+        assert len(flags_and_muc) == 4
 
         constructor_args = {}
         constructor_args["member_names"] = list(abundance_parameters.keys())

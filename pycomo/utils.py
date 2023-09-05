@@ -46,7 +46,7 @@ def remove_dunder_from_ascii_escape(match_obj):
         return match_obj.group()[1:-1]
 
 
-def read_medium_from_file(file, comp="_exchg"):
+def read_medium_from_file(file, comp):
     medium_df = pd.read_csv(file, sep=",")
     medium_dict = {}
     for idx, row in medium_df.iterrows():
@@ -105,7 +105,7 @@ def close_to_zero(num, t=10**-10):
     return -t < num < t
 
 
-def get_model_biomass_compound(model, expected_biomass_id="", generate_if_none=False):
+def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_id="", generate_if_none=False):
     """This will produce a biomass metabolite with a unique production reaction"""
     objective = str(model.objective.expression).split("*")[1].split(' ')[0]
     biomass_rxn = model.reactions.get_by_id(objective)
@@ -123,7 +123,8 @@ def get_model_biomass_compound(model, expected_biomass_id="", generate_if_none=F
         # No metabolites produced
         if generate_if_none:
             print(f"Note: no products in the objective function, adding biomass to it.")
-            biomass_met = cobra.Metabolite("cpd11416_exchg", name='Biomass', compartment='exchg')
+            biomass_met = cobra.Metabolite(f"cpd11416_{shared_compartment_name}", name='Biomass',
+                                           compartment=shared_compartment_name)
             model.add_metabolites([biomass_met])
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
@@ -134,7 +135,8 @@ def get_model_biomass_compound(model, expected_biomass_id="", generate_if_none=F
         # Multiple products in the objective, making biomass metabolites ambiguous
         if generate_if_none:
             print(f"Note: no products in the objective function, adding biomass to it.")
-            biomass_met = cobra.Metabolite("cpd11416_exchg", name='Biomass', compartment='exchg')
+            biomass_met = cobra.Metabolite(f"cpd11416_{shared_compartment_name}", name='Biomass',
+                                           compartment=shared_compartment_name)
             model.add_metabolites([biomass_met])
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
@@ -234,14 +236,17 @@ def check_mass_balance_of_metabolites_with_identical_id(model_1, model_2):
     return unbalanced_metabolites
 
 
-def create_parameter_in_sbml_model(sbml_model, pid, is_constant, value=None):
+def create_parameter_in_sbml_model(sbml_model, pid, is_constant, value=None, as_name=False):
     """
     Helper function to set a parameter with ID and value to a SBML model.
     """
     parameter = sbml_model.createParameter()
     parameter.setId(pid)
     if value is not None:
-        parameter.setValue(value)
+        if as_name:
+            parameter.setName(value)
+        else:
+            parameter.setValue(value)
     parameter.setConstant(is_constant)
 
 
@@ -288,6 +293,12 @@ def get_flags_and_muc_from_sbml_file(sbml_file):
                 value = parameter.getValue()
             value = value == 1  # Flags are stored as 1 and 0 for True and False. None is converted to False
             parameter_dict["fixed_abundance_flag"] = value
+        if parameter_id == "shared_compartment_id":
+            if not parameter.isSetName():
+                raise ValueError("Error: Missing parameter shared_compartment_id (parameter name should contain ID of "
+                                 "the shared compartment)")
+            name = parameter.getName()
+            parameter_dict["shared_compartment_name"] = name
         if parameter_id == "fixed_growth_rate_flag":
             value = 0
             if parameter.isSetValue():
@@ -296,7 +307,6 @@ def get_flags_and_muc_from_sbml_file(sbml_file):
             parameter_dict["fixed_growth_rate_flag"] = value
 
     return parameter_dict
-
 
 
 def get_abundance_parameters_from_sbml_file(sbml_file):
