@@ -5,11 +5,15 @@ PyCoMo is a python 3 package for the creation and analysis of community metaboli
 The community models can be analysed with PyCoMo to predict all feasible exchange metabolites and cross-feeding interactions, for the whole space of growth rate and abundance profiles. The community models are COBRApy models and can therefor be directly used by other COBRA methods. It is also possible to save and load the community models in SBML format, allowing to share and reuse the models built with PyCoMo.
 
 ## Installation
-For installing PyCoMo download or clone the repository to your machine.
+PyCoMo can be installed via pip.
+```
+pip install pycomo
+```
+Alternatively PyCoMo can be installed from the GitHub repository. First clone the repository to your machine.
 ```
 git clone https://github.com/univieCUBE/PyCoMo
 ```
-Run pip install on the folder containing the PyCoMo repository.
+Next run pip install on the folder containing the PyCoMo repository.
 ```
 pip install path/to/PyCoMo
 ```
