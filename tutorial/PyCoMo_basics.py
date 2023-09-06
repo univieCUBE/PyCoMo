@@ -11,11 +11,7 @@
 # In[1]:
 
 
-from pathlib import Path
 import sys
-import cobra
-import os
-
 
 # ### Importing PyCoMo ###
 # As PyCoMo is currently only available as a local package, the direct path to the package directory needs to be used on import.
@@ -23,18 +19,9 @@ import os
 # In[2]:
 
 
-path_root = "../pycomo"  # Change path according to your PyCoMo location
+path_root = "../src/pycomo"  # Change path according to your PyCoMo location
 sys.path.append(str(path_root))
-import pycomo as pycomo
-
-
-# Now we will check if PyCoMo was loaded correctly. For this, we will run the help function on the PyCoMo package.
-
-# In[3]:
-
-
-#help(pycomo)
-
+from src import pycomo as pycomo
 
 # ## Creating a Community Model ##
 # The creation of a community model consists of 3 steps:
@@ -62,7 +49,7 @@ named_models
 
 
 # ### Preparing the models for merging ###
-# With the models loaded, the next step is preparing them for merging. This is done by creating SingleOrganismModel objects. Using them, the models will be formatted for compliance with the SBML format. Further, an exchange compartment will be generated under the name _exchg_.
+# With the models loaded, the next step is preparing them for merging. This is done by creating SingleOrganismModel objects. Using them, the models will be formatted for compliance with the SBML format. Further, an exchange compartment will be generated under the name _medium_.
 
 # One of the requirements for a community metabolic model is a common biomass function. To construct it, PyCoMo requires the biomass of each member represented as a single metabolite. This biomass metabolite ID can be specified when constructing the SingleOrganismModel objects. However, it can also be found or generated automatically, by setting the biomass reaction as the objective of the model. Let's check if the biomass function is the objective in all the models
 
@@ -95,16 +82,16 @@ community_name = "henson_community_model"
 com_model_obj = pycomo.CommunityModel(single_org_models, community_name)
 
 
-# The cobra model of the community will generated the first time it is needed. We can enforce this now, by calling it via .community_model
+# The cobra model of the community will generated the first time it is needed. We can enforce this now, by calling it via .model
 
 # In[9]:
 
 
-com_model_obj.community_model
+com_model_obj.model
 
 
 # The output of the community model creation contains quite some lines of info and warnings. This is to be expected. Let's have a look at the different types of info:
-# 1. _Ignoring reaction 'EX_4abz_exchg' since it already exists._ This line will come up if a reaction is present in two different community member models under the same ID. This will only happen for exchange reactions in the exchange compartment and are therefor correct behaviour.
+# 1. _Ignoring reaction 'EX_4abz_medium' since it already exists._ This line will come up if a reaction is present in two different community member models under the same ID. This will only happen for exchange reactions in the exchange compartment and are therefor correct behaviour.
 # 2. _WARNING: no annotation overlap found for matching metabolite mn2. Please make sure that the metabolite with this ID is indeed representing the same substance in all models!_ This warning comes up if exchange metabolites do not contain any matching annotation field. This can be an indicator that metabolites with the same ID are merged, but they represent different chemicals. Another common cause is that no annotation was given for this metabolite in one of the models.
 # 3. _WARNING: matching of the metabolite CO2_EX is unbalanced (mass and/or charge). Please manually curate this metabolite for a mass and charge balanced model!_ This warning means that the formula of an exchange metabolite was different between member models. This can be due to the formula being omitted in some of the models. The other reason is that the metabolites differ in their mass or charge. As this would lead to generation or loss of matter from nothing, these issues need to be resolved for a consistent metabolic model.
 
@@ -171,7 +158,7 @@ com_model_obj_loaded
 # In[17]:
 
 
-com_model_obj_loaded.community_model.optimize()
+com_model_obj_loaded.model.optimize()
 
 
 # ### Quality Checks ###
@@ -219,16 +206,16 @@ com_model_obj = pycomo.CommunityModel(single_org_models, community_name)
 
 
 medium = {
-    'EX_CO2_EX_exchg': 1000.0,
-    'EX_Eth_EX_exchg': 1000.0,
-    'EX_BM_tot_exchg': 1000.0
+    'EX_CO2_EX_medium': 1000.0,
+    'EX_Eth_EX_medium': 1000.0,
+    'EX_BM_tot_medium': 1000.0
 }
 com_model_obj.medium = medium
 com_model_obj.apply_medium()
 
 # Some metabolites are not allowed to accumulate in the medium.
-com_model_obj.community_model.reactions.get_by_id("EX_Form_EX_exchg").upper_bound = 0.
-com_model_obj.community_model.reactions.get_by_id("EX_H2_EX_exchg").upper_bound = 0.
+com_model_obj.model.reactions.get_by_id("EX_Form_EX_medium").upper_bound = 0.
+com_model_obj.model.reactions.get_by_id("EX_H2_EX_medium").upper_bound = 0.
 
 
 # ### Calculating potential metabolite exchange ###
@@ -261,11 +248,11 @@ for i in range (0,100,1):  # fraction of D. vulgaris
         com_model_obj.apply_fixed_abundance(abundances)
         
         # Reapply the bound restrictions of the exchange reactions
-        com_model_obj.community_model.reactions.get_by_id("EX_Form_EX_exchg").upper_bound = 0.
-        com_model_obj.community_model.reactions.get_by_id("EX_H2_EX_exchg").upper_bound = 0.
+        com_model_obj.model.reactions.get_by_id("EX_Form_EX_medium").upper_bound = 0.
+        com_model_obj.model.reactions.get_by_id("EX_H2_EX_medium").upper_bound = 0.
         
         # Calculate the optimal growth rate
-        solution = com_model_obj.community_model.optimize()
+        solution = com_model_obj.model.optimize()
         growth = 0. if str(solution.status) == "infeasible" else solution.objective_value
         rows.append({"dv": i/100., "mh": j/100., "growth": growth})
         
@@ -286,10 +273,4 @@ growth_df_pivot = growth_df.pivot("mh", "dv", "growth")
 f, ax = plt.subplots(figsize=(9, 6))
 sns.heatmap(growth_df_pivot, ax=ax)
 ax.invert_yaxis()
-
-
-# In[ ]:
-
-
-
 
