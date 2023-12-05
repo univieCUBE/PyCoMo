@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycomo"
+version = "0.1.1a1"
+description = "PyCoMo is a software package for generating and analysing compartmentalized community metabolic models"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Michael Predl", email = "michael.predl@univie.ac.at"}
+]
+maintainers = [
+    {name = "Michael Predl", email = "michael.predl@univie.ac.at"}
+]
+readme = "README.md"
+classifiers=[
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3"
+]
+requires-python = ">=3.9"
+dependencies = [
+    "cobra >= 0.23.0",
+    "pandas >= 1.5.3",
+    "python-libsbml >= 5.20.1",
+    "numpy >= 1.22.4"
+]
+
+[project.urls]
+repository = "https://github.com/univieCUBE/PyCoMo"
+
+[project.scripts]
+pycomo = "pycomo.pycomo_models:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
