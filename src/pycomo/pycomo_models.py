@@ -4,7 +4,7 @@
 Authors: Michael Predl, Marianne Mießkes
 The pycomo module contains classes for single species and community metabolic models. They extend the cobrapy classes
 by metainformation required for community model generation. The community model can be used for simulation, transfer via
- the sbml format, setting abundances and generation of FBA flux vector tables.
+the sbml format, setting abundances and generation of FBA flux vector tables.
 """
 
 # IMPORT SECTION
@@ -389,6 +389,7 @@ class CommunityModel:
     fixed_growth_rate_flag: bool = False
     max_flux: float = 1000.
     shared_compartment_name: str = None
+    _dummy_metabolite_scaling_factor = 0.01
     _f_metabolites: list = None
     _f_reactions: list = None
     _model: cobra.Model = None
@@ -574,7 +575,7 @@ class CommunityModel:
     def get_member_name_of_reaction(self, reaction):
         """
         This function will return the name of the member the reaction belongs to by extracting this information from its
-         ID.
+        ID.
         """
         if isinstance(reaction, str):
             metabolite = self.model.reactions.get_by_id(reaction)
@@ -744,13 +745,13 @@ class CommunityModel:
                 if reaction.lower_bound != 0:
                     coefficient = -self.max_flux if reaction.lower_bound < -self.max_flux else reaction.lower_bound
                     constrained_mets[met_lb] = coefficient
-                    fraction_reaction_mets[met_lb] = -coefficient
-                    reaction.add_metabolites({met_lb: 1})
+                    fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
+                    reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor})
                 if reaction.upper_bound != 0:
                     coefficient = self.max_flux if reaction.upper_bound > self.max_flux else reaction.upper_bound
                     constrained_mets[met_ub] = coefficient
-                    fraction_reaction_mets[met_ub] = coefficient
-                    reaction.add_metabolites({met_ub: -1})
+                    fraction_reaction_mets[met_ub] = coefficient * self._dummy_metabolite_scaling_factor
+                    reaction.add_metabolites({met_ub: -self._dummy_metabolite_scaling_factor})
 
                 # Relax reaction bounds
                 if reaction.lower_bound < 0:
@@ -804,16 +805,16 @@ class CommunityModel:
         # Assign the constraint metabolites the reaction coefficients
         if lower_bound != 0:
             coefficient = -self.max_flux if lower_bound < -self.max_flux else lower_bound
-            fraction_reaction_mets[met_lb] = -coefficient
-            reaction.add_metabolites({met_lb: 1}, combine=False)
+            fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
+            reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor}, combine=False)
         else:
             reaction.add_metabolites({met_lb: 0}, combine=False)
             fraction_reaction_mets[met_lb] = 0
 
         if upper_bound != 0:
             coefficient = self.max_flux if upper_bound > self.max_flux else upper_bound
-            fraction_reaction_mets[met_ub] = coefficient
-            reaction.add_metabolites({met_ub: -1}, combine=False)
+            fraction_reaction_mets[met_ub] = coefficient * self._dummy_metabolite_scaling_factor
+            reaction.add_metabolites({met_ub: -self._dummy_metabolite_scaling_factor}, combine=False)
         else:
             fraction_reaction_mets[met_ub] = 0
             reaction.add_metabolites({met_ub: 0}, combine=False)
@@ -835,10 +836,10 @@ class CommunityModel:
         self.add_sink_reactions_to_metabolites(model, metabolites_needing_sink_reactions)
 
     def add_sink_reactions_to_metabolites(self, model, constraint_mets, lb=0., inplace=True):
-        sink_max_flux = 1000000
+        sink_max_flux = self.max_flux
 
-        if sink_max_flux < 10*self.max_flux:
-            sink_max_flux = 10*self.max_flux
+        if sink_max_flux < 10 * self._dummy_metabolite_scaling_factor * self.max_flux:
+            sink_max_flux = 10 * self._dummy_metabolite_scaling_factor * self.max_flux
 
         if not inplace:
             model = model.copy()
@@ -1316,6 +1317,7 @@ class CommunityModel:
         return exchg_metabolite_df
 
     def potential_metabolite_exchanges(self, fba=False, fva_mu_c=None):
+        # TODO: give the option to return the flux vector
         if fba:
             exchange_df = self.cross_feeding_metabolites_from_fba()
         elif fva_mu_c is not None:
