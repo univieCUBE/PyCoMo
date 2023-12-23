@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-"""
-Authors: Michael Predl, Marianne Mießkes
-The pycomo module contains classes for single species and community metabolic models. They extend the cobrapy classes
-by metainformation required for community model generation. The community model can be used for simulation, transfer via
-the sbml format, setting abundances and generation of FBA flux vector tables.
-"""
+"""Authors: Michael Predl, Marianne Mießkes The pycomo module contains classes for single species and community
+metabolic models. They extend the COBRApy classes by meta-information required for community model generation. The
+community model can be used for simulation, transferred via the sbml format, setting abundances and generation of FBA
+flux vector tables."""
 
 # IMPORT SECTION
 import cobra
@@ -21,7 +19,22 @@ from .helper.cli import *
 
 class SingleOrganismModel:
     """
-    This class contains a single organism metabolic model and its meta information needed for community model generation
+    This class is used to bundle single organism metabolic models with their meta-information necessary for community
+    metabolic model generation. The class also handles quality control and preprocessing for merging into a community
+    model.
+
+    :param model: The model as a COBRApy model object
+    :type model: class:`cobra.Model`
+    :param name: The name of the model
+    :type name: str
+    :param biomass_met: The biomass metabolite of the model
+    :type biomass_met: class:`cobra.metabolite`
+    :param biomass_met_id: The ID of the biomass metabolite
+    :type biomass_met_id: str
+    :param prepared_model: The preprocessed model for merging
+    :type prepared_model: class:`cobra.Model`
+    :param shared_compartment_name: The name of the shared compartment to be used in the community metabolic model
+    :type shared_compartment_name: str
     """
     model: cobra.Model
     name: str
@@ -34,6 +47,16 @@ class SingleOrganismModel:
     _exchange_met_name_conversion: dict = {}
 
     def __init__(self, model, name, biomass_met_id="", name_via_annotation=None, shared_compartment_name="medium"):
+        """
+        Constructor method
+
+        :param model: The metabolic model of the organism as a COBRApy model object
+        :param name: The name of the model
+        :param biomass_met_id: The ID of the biomass metabolite
+        :param name_via_annotation: The database to be used for matching boundary metabolites when merging into a
+            community metabolic model. If None, matching of metabolites is done via metabolite IDs instead
+        :param shared_compartment_name: The name of the shared compartment to be used in the community metabolic model
+        """
         self.model = model.copy()
         self._original_name = name
         self.name = make_string_sbml_id_compatible(name, remove_ascii_escapes=True)
@@ -44,15 +67,38 @@ class SingleOrganismModel:
         self.shared_compartment_name = shared_compartment_name
 
     def get_name_conversion(self):
+        """
+        Retrieve the original and current name of this model.
+
+        :return: original name, current name
+        """
         return self._original_name, self.name
 
     def set_name_via_annotation(self, name_via_annotation):
+        """
+        Set the name_via_annotation attribute of the model. If a model was already prepared for merging, the
+        preprocessing is repeated with the newly set attribute.
+
+        :param name_via_annotation: The database to be used for matching boundary metabolites when merging into a
+            community metabolic model. If None, matching of metabolites is done via metabolite IDs instead
+        """
         self._name_via_annotation = name_via_annotation
         if self.prepared_model is not None:
             self.prepare_for_merging()
 
     def rename_comp_in_met_id(self, model, old_comp, new_comp, inplace=True, change_name=False,
                               remove_comp_from_name=False):
+        """
+        Renames the compartments in metabolite IDs.
+
+        :param model: Model to be changed
+        :param old_comp: The compartment to be renamed
+        :param new_comp: The new name of the compartment
+        :param inplace: If True, change the input model, else a copy is created and changed
+        :param change_name: If True, change the metabolite name in addition to the metabolite ID
+        :param remove_comp_from_name: If True, remove the compartment from the metabolite name (if present)
+        :return: Model with renamed compartments in metabolite IDs
+        """
         if not inplace:
             model = model.copy()
 
@@ -80,6 +126,16 @@ class SingleOrganismModel:
             return model
 
     def rename_comp_in_rxn_id(self, model, old_comp, new_comp, inplace=True, change_name=False):
+        """
+        Renames the compartments in reaction IDs.
+
+        :param model: Model to be changed
+        :param old_comp: The compartment to be renamed
+        :param new_comp: The new name of the compartment
+        :param inplace: If True, change the input model, else a copy is created and changed
+        :param change_name: If True, change the reaction name in addition to the metabolite ID
+        :return: Model with renamed compartments in reaction IDs
+        """
         if not inplace:
             model = model.copy()
 
@@ -96,6 +152,13 @@ class SingleOrganismModel:
             return model
 
     def rename_compartment(self, model, rename):
+        """
+        Rename compartments of a model
+
+        :param model: Model to be changed
+        :param rename: A dictionary containing old compartments as keys and the new compartment names as values
+        :return: The model with renamed compartments
+        """
         old_compartments = model.compartments
         for comp in rename.keys():
             assert comp in old_compartments
@@ -114,6 +177,16 @@ class SingleOrganismModel:
         return model
 
     def add_exchange_reactions_to_compartment(self, model, comp, inplace=True):
+        """
+        This method adds exchange reactions for all metabolites in a specified compartment. The method is used during
+        preprocessing for model merging, to generate exchange reactions for all metabolites in the new compartment
+        shared between community members.
+
+        :param model: Model to be changed
+        :param comp: The compartment ID where exchange metabolites should be added (i.e. the new, shared compartment)
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: None if the inplace flag is set, otherwise the model with added exchange reactions
+        """
         if not inplace:
             model = model.copy()
 
@@ -128,6 +201,15 @@ class SingleOrganismModel:
             return model
 
     def add_exchange_reactions_to_metabolites(self, model, mets, lb=0., inplace=True):
+        """
+        Adds exchange reactions to a list of metabolites.
+
+        :param model: Model to be changed
+        :param mets: A list of metabolites where exchange reactions should be added
+        :param lb: The lower bound for the exchange reactions
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: None if the inplace flag is set, otherwise the model with added exchange reactions
+        """
         if not inplace:
             model = model.copy()
 
@@ -149,7 +231,18 @@ class SingleOrganismModel:
                            ub=None,
                            sbo_term=None,
                            ):
+        """
+        A function for adding an exchange reaction. In difference to the COBRApy functionality, this function can also
+        set exchange reactions in compartments other than the exchange compartment.
 
+        :param model: Model to be changed
+        :param metabolite: The metabolite where an exchange reaction should be added
+        :param reaction_id: An ID for the new reaction ID
+        :param lb: The lower bound for the exchange reaction
+        :param ub: The upper bound for the exchange reaction
+        :param sbo_term: The SBO term to be used for the reaction
+        :return: The added exchange reaction
+        """
         sbo_terms = cobra.medium.sbo_terms
         ub = 1000. if ub is None else ub
         lb = -1000. if lb is None else lb
@@ -183,6 +276,14 @@ class SingleOrganismModel:
         return rxn
 
     def find_metabolites_without_exchange_rxn(self, model, exchg_comp=""):
+        """
+        This method finds metabolites that do not have exchange reactions. This is useful for checking whether all
+        metabolites that are meant to be boundary metabolites actually have an exchange reaction connected.
+
+        :param model: Model to be checked
+        :param exchg_comp: The compartment to be searched for metabolites without exchange reactions
+        :return: A list of metabolites without exchange reactions
+        """
         if len(exchg_comp) == 0:
             exchg_comp = cobra.medium.find_external_compartment(model)
         comp_mets = model.metabolites.query(lambda x: x.compartment == exchg_comp)
@@ -191,6 +292,17 @@ class SingleOrganismModel:
         return mets_without_exchg
 
     def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True):
+        """
+        When preprocessing the model for merging into a community metabolic model, a new shared compartment is added.
+        This new compartment will be the compartment for boundary metabolites, containing all metabolites with exchange
+        reactions. The previous boundary metabolites should then have their exchange reactions converted into transport
+        reactions, which transfer the metabolites into the new, shared compartment.
+
+        :param model: The model to be changed
+        :param old_comp: The ID of the old exchange compartment
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: None if the inplace flag is set, otherwise the model with changed reactions
+        """
         if not inplace:
             model = model.copy()
 
@@ -219,6 +331,16 @@ class SingleOrganismModel:
             return model
 
     def add_boundary_metabolites_to_exchange_compartment(self, model, new_comp=None, old_comp="", inplace=True):
+        """
+        This function adds boundary metabolites to the new exchange compartment for every metabolite in the old external
+         compartment
+
+        :param model: Model to be changed
+        :param new_comp: ID of the new compartment
+        :param old_comp: ID of the old external compartment
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: None if the inplace flag is set, otherwise the updated model
+        """
         if new_comp is None:
             new_comp = self.shared_compartment_name
 
@@ -259,6 +381,16 @@ class SingleOrganismModel:
             return model
 
     def ensure_compartment_suffix(self, model, inplace=True):
+        """
+        This method checks all metabolite IDs and reaction IDs for a suffix containing the compartment they are in.
+        Should the name of the compartment not be part of the ID, the suffix is added, as it is necessary for some
+        operations of this class. The reaction ID will only be changed to contain a compartment suffix if all
+        metabolites that are part of the reaction are found in the same compartment.
+
+        :param model: The model to be changed
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: The updated model
+        """
         if not inplace:
             model = model.copy()
 
@@ -279,6 +411,18 @@ class SingleOrganismModel:
         return model
 
     def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True):
+        """
+        Add a new exchange compartment. This will also copy all metabolites in the current external compartment to the
+        exchange compartment, establish transport reactions between the two compartments for all metabolites and add
+        new exchange reactions for all copied metabolites.
+
+        :param model: Model to be changed
+        :param exchg_comp_name: Name of the new exchange compartment
+        :param add_missing_transports: If True, add exchange reactions and transport reactions for all metabolites in
+            the old external compartment that did not have any exchange reactions
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: Updated model
+        """
         if exchg_comp_name is None:
             exchg_comp_name = self.shared_compartment_name
 
@@ -298,6 +442,15 @@ class SingleOrganismModel:
         return model
 
     def prefix_metabolite_names(self, model, prefix, exclude_compartment="", inplace=True):
+        """
+        Adds a prefix to all metabolite IDs, that do not already have this prefix.
+
+        :param model: Model to be changed
+        :param prefix: The prefix to be added to the metabolite IDs
+        :param exclude_compartment: Metabolites in this compartment are not changed
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: Updated model
+        """
         if not inplace:
             model = model.copy()  # Don't want to change the original
 
@@ -311,6 +464,15 @@ class SingleOrganismModel:
         return model
 
     def prefix_reaction_names(self, model, prefix, exclude_compartment="", inplace=True):
+        """
+        Adds a prefix to all reaction IDs, that do not already have this prefix.
+
+        :param model: Model to be changed
+        :param prefix: The prefix to be added to the reaction IDs
+        :param exclude_compartment: Reactions with this compartment suffix in their ID are not changed
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: Updated model
+        """
         if not inplace:
             model = model.copy()  # Don't want to change the original
 
@@ -324,6 +486,15 @@ class SingleOrganismModel:
         return model
 
     def prefix_gene_names(self, model, prefix, inplace=True):
+        """
+        Adds a prefix to all gene IDs, that do not already have this prefix. Also writes the original gene ID as the
+        gene name, if it is not yet set.
+
+        :param model: Model to be changed
+        :param prefix: The prefix to be added to the gene IDs
+        :param inplace: If True, the input model will be changed, else a copy is made
+        :return: Updated model
+        """
         if not inplace:
             model = model.copy()  # Don't want to change the original
 
@@ -342,6 +513,14 @@ class SingleOrganismModel:
         return model
 
     def remove_biomass_exchange_rxn(self, model, remove_all_consuming_rxns=True):
+        """
+        Removes all exchange reactions of the biomass metabolite. This is used to ensure that the biomass metabolite
+        will only be consumed by the community biomass reaction.
+
+        :param model: Model to be changed
+        :param remove_all_consuming_rxns: If True, remove all reactions consuming the biomass metabolite as well
+        :return: None
+        """
         for reaction in self.biomass_met.reactions:
             if reaction in model.exchanges:
                 reaction.remove_from_model()
@@ -350,6 +529,20 @@ class SingleOrganismModel:
         return
 
     def prepare_for_merging(self, shared_compartment_name=None):
+        """
+        Prepares the model for merging into a community metabolic model. The generated model is SBML conform and all
+        genes, reactions, compartments and metabolites contain the information that they belong to this model (which is
+        important for traceability after merging into a community metabolic model). The procedure is as follows:
+        - Get the ID of the biomass metabolite, if not already specified
+        - Remove the biomass exchange reaction
+        - Ensure SBML conform IDs in the whole model
+        - Add the compartment name as suffix for all metabolites and reactions
+        - Add the new shared exchange compartment and populate it with the boundary metabolites
+        - Prefix all compartments, genes, reactions and metabolites with the name of the model
+
+        :param shared_compartment_name: The ID of the new shared exchange compartment
+        :return: The model prepared for merging
+        """
         if shared_compartment_name is not None:
             self.shared_compartment_name = shared_compartment_name
         self.prepared_model = self.model.copy()
@@ -378,7 +571,26 @@ class SingleOrganismModel:
 
 class CommunityModel:
     """
-    This class contains a single organism metabolic model and its meta information needed for community model generation
+    This class contains the community metabolic model and its meta information. It is used for generating the community
+    metabolic model from its members models. It also provides functionality to analyse community metabolic models, such
+    as detection of thermodynamically infeasible cycles and calculation of all possible exchanged metabolites.
+    The community metabolic model can switch between two states: The fixed abundance state and the fixed growth rate
+    state. These states are important for ensuring the model is in steady-state. Switching between the two states is
+    possible at any point.
+
+    :param model: The community metabolic model
+    :param medium: The medium of the model, defined as a dictionary with exchange reaction IDs as keys and the maximum
+        flux of the respective metabolite as value.
+    :param f_metabolites: A list of f_metabolites (dummy metabolites controlling the reaction bounds)
+    :param f_reactions: A list of f_reactions (dummy reactions controlling the reaction bounds)
+    :param member_models: A list of the models of the community members (SingleOrganismModel class)
+    :param name: The name of the community metabolic model
+    :param medium_flag: A flag whether a medium has been applied to the model
+    :param mu_c: The community growth rate
+    :param fixed_abundance_flag: A flag, whether the community metabolic model is in fixed abundance state
+    :param fixed_growth_rate_flag: A flag, whether the community metabolic model is in fixed growth rate state
+    :param max_flux: The maximum flux for all reactions in the community metabolic model
+    :param shared_compartment_name: The name of the compartment for sharing metabolites and the medium
     """
     member_models: List[SingleOrganismModel]
     name: str
@@ -401,6 +613,17 @@ class CommunityModel:
 
     def __init__(self, models=None, name="", merge_via_annotation=None, mu_c=1., max_flux=1000.,
                  shared_compartment_name="medium", **kwargs):
+        """
+        Constructor method.
+
+        :param models: A list of models of the community members as SingleOrganismModel objects
+        :param name: The name of the community metabolic model
+        :param merge_via_annotation: The database to be used for matching boundary metabolites when merging into a
+            community metabolic model. If None, matching of metabolites is done via metabolite IDs instead
+        :param mu_c: The community growth rate to be set
+        :param max_flux: The maximum flux for all reactions in the community metabolic model
+        :param shared_compartment_name: The name of the compartment for sharing metabolites and the medium
+        """
         self.member_models = models
         self.mu_c = mu_c
         self.shared_compartment_name = shared_compartment_name
@@ -458,10 +681,21 @@ class CommunityModel:
 
     @property
     def model(self):
+        """
+        The community metabolic model (COBRApy model object)
+
+        :return: The community metabolic model (COBRApy model object)
+        """
         return self._model
 
     @model.getter
     def model(self):
+        """
+        Getter for the community metabolic model (COBRApy model object). If no model is present, it will be generated
+        from the community member models
+
+        :return: The community metabolic model (COBRApy model object)
+        """
         if self._model is None:
             print(f"No community model generated yet. Generating now:")
             self.generate_community_model()
@@ -472,10 +706,21 @@ class CommunityModel:
 
     @property
     def f_metabolites(self):
+        """
+        A list of f_metabolites (dummy metabolites controlling the reaction bounds)
+
+        :return: A list of f_metabolites (dummy metabolites controlling the reaction bounds)
+        """
         return self._f_metabolites
 
     @f_metabolites.getter
     def f_metabolites(self):
+        """
+        Getter function for the list of f_metabolites (dummy metabolites controlling the reaction bounds). Finds all
+        metabolites in the compartment for dummy metabolites (fraction_reaction)
+
+        :return: A list of f_metabolites (dummy metabolites controlling the reaction bounds)
+        """
         self._f_metabolites = self.model.metabolites.query(lambda x: x.compartment == "fraction_reaction")
         if self._f_metabolites is None:
             self._f_metabolites = []
@@ -483,10 +728,20 @@ class CommunityModel:
 
     @property
     def f_reactions(self):
+        """
+        A list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
         return self._f_reactions
 
     @f_reactions.getter
     def f_reactions(self):
+        """
+        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
         self._f_reactions = self.model.reactions.query(
             lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
         if self._f_reactions is None:
@@ -495,10 +750,21 @@ class CommunityModel:
 
     @property
     def medium(self):
+        """
+        The medium of the community metabolic model
+
+        :return: A dictionary of reaction IDs as keys and their maximum influx as values
+        """
         return self._medium
 
     @medium.getter
     def medium(self):
+        """
+        Getter function for the medium of the community metabolic model.
+
+        :raises AssertionError: If no medium has been set so far, this error is raised
+        :return: A dictionary of reaction IDs as keys and their maximum influx as values
+        """
         if self._medium is None:
             raise AssertionError("Error: No medium set for this community model.\nPlease set the medium with "
                                  ".load_medium_from_file('/path/to/medium_file.csv')")
@@ -506,6 +772,14 @@ class CommunityModel:
 
     @medium.setter
     def medium(self, medium_dict):
+        """
+        Setter function for the medium of the community metabolic model.
+
+        :raises AssertionError: If not all keys of the medium dictionary are strings, or not all values are floats,
+            this error is raised.
+        :param medium_dict: The medium dictionary with exchange reaction IDs as keys and the maximum
+            flux of the respective metabolite as value.
+        """
         # Check that dataframe has the correct format
         try:
             assert all([isinstance(key, str) for key in medium_dict.keys()])
@@ -515,6 +789,13 @@ class CommunityModel:
         self._medium = medium_dict
 
     def summary(self, suppress_f_metabolites=True):
+        """
+        Calls and returns the summary method of community metabolic model. Dummy metabolites and reactions can be
+        excluded from the flux report by setting the suppress_f_metabolites flag.
+
+        :param suppress_f_metabolites: If true, excludes dummy metabolites and reactions from the flux report
+        :return: The COBRApy summary object of the community metabolic model
+        """
         summary = self.model.summary()
 
         if suppress_f_metabolites:
@@ -531,6 +812,11 @@ class CommunityModel:
         return summary
 
     def generate_member_name_conversion_dict(self):
+        """
+        Creates a dictionary matching old and current names of each of the community members
+
+        :return: Dictionary with old names as keys and current names as values
+        """
         conversion_dict = {}
         if self.member_models is not None:
             for member in self.member_models:
@@ -543,6 +829,11 @@ class CommunityModel:
         return conversion_dict
 
     def get_member_names(self):
+        """
+        Get the names of all community members
+
+        :return: A list of all community member names
+        """
         if self.member_models is not None:
             member_names = [member.name for member in self.member_models]
         else:
@@ -550,15 +841,41 @@ class CommunityModel:
         return member_names
 
     def get_unbalanced_reactions(self):
-        return cobra.manipulation.validate.check_mass_balance(self.model)
+        """
+        Checks all functions in the community metabolic model for mass and charge balance. The check itself is
+        performed by the function check_mass_balance of COBRApy.
+
+        :return: A list of unbalanced reactions
+        """
+        try:
+            unbalanced_reactions = cobra.manipulation.validate.check_mass_balance(self.model)
+        except TypeError:
+            # This TypeError can come from multiple sbo terms being present in reaction annotations
+            with self.model.copy() as single_reaction_sbo_model:
+                for rxn in single_reaction_sbo_model.reactions:
+                    if isinstance(rxn.annotation.get("sbo"), list):
+                        rxn.annotation["sbo"] = rxn.annotation.get("sbo")[0]
+                unbalanced_reactions = cobra.manipulation.validate.check_mass_balance(single_reaction_sbo_model)
+
+        return unbalanced_reactions
 
     def is_mass_balanced(self):
+        """
+        Checks if all reactions in the community metabolic model are mass and charge balanced. Returns True if mass and
+        charge balance is achieved, else False.
+
+        :return: True if mass and charge balance is achieved, else False
+        """
         return not bool(self.get_unbalanced_reactions())
 
     def get_loops(self):
-        """This is a function to find closed loops that can sustain flux without any input or output. Such loops are
+        """
+        This is a function to find closed loops that can sustain flux without any input or output. Such loops are
         thermodynamically infeasible and biologically nonsensical. Users should be aware of their presence and
-        either remove them or check any model solutions for the presence of these cycles."""
+        either remove them or check any model solutions for the presence of these cycles.
+
+        :return: A DataFrame of reactions that carry flux without any metabolite input or output in the model
+        """
         try:
             original_medium = self.medium
         except AssertionError:
@@ -576,6 +893,9 @@ class CommunityModel:
         """
         This function will return the name of the member the reaction belongs to by extracting this information from its
         ID.
+
+        :param reaction: The reaction or reaction ID whose community member should be found
+        :return: The name of the community member the reaction belongs to
         """
         if isinstance(reaction, str):
             metabolite = self.model.reactions.get_by_id(reaction)
@@ -593,6 +913,9 @@ class CommunityModel:
         """
         This function will return the name of the member the metabolite belongs to by extracting this information from
         its ID.
+
+        :param metabolite: The metabolite or metabolite ID whose community member should be found
+        :return: The name of the community member the metabolite belongs to
         """
         if isinstance(metabolite, str):
             metabolite = self.model.metabolites.get_by_id(metabolite)
@@ -610,6 +933,9 @@ class CommunityModel:
         """
         This function will return the name of the member the compartment belongs to by extracting this information from
         its ID.
+
+        :param compartment: The compartment ID whose community member should be found
+        :return: The name of the community member the compartment belongs to
         """
         member_name = None
 
@@ -621,6 +947,18 @@ class CommunityModel:
         return member_name
 
     def generate_community_model(self):
+        """
+        This method generates a community metabolic model by merging the models of its community members. The resulting
+        community metabolic model is in fixed growth state. The procedure is as follows:
+        - Each of the community member models is preprocessed for merging (see SingleOrganismModel class for details)
+        - The preprocessed models are converted into equivalent, bound-free form
+        - The preprocessed, bound-free models are merged into a community metabolic model
+        - The community biomass reaction is created and added
+        - A fixed growth rate is applied and the model is set to fixed growth state
+        - The model is checked for mass and charge balance, warning the user if unbalanced reactions exist
+
+        :return: The community metabolic model
+        """
         merged_model = None
         biomass_mets = {}
         idx = 0
@@ -705,6 +1043,13 @@ class CommunityModel:
         return merged_model
 
     def create_fraction_reaction(self, model, member_name):
+        """
+        Creates a reaction producing dummy metabolites, which control the bounds of the regular reactions. This method
+        is used on the member metabolic models during community metabolic model generation.
+
+        :param model: Model to be changed
+        :param member_name: The name of the community member
+        """
         fraction_reaction = cobra.Reaction(f"{member_name}_fraction_reaction")
         # create f_final metabolite
         f_final_met = cobra.Metabolite("f_final_met", name='Final Fraction Reaction Metabolite',
@@ -726,6 +1071,14 @@ class CommunityModel:
         self.add_sink_reactions_to_metabolites(model, constraint_mets)
 
     def convert_constraints_to_metabolites(self, model, member_name):
+        """
+        This function creates dummy metabolites for the constraints of each reaction in a model. This method
+        is used on the member metabolic models during community metabolic model generation.
+
+        :param model: Model to be changed
+        :param member_name: The name of the community member
+        :return: Dictionary of dummy metabolites (keys) and the bound they represent (values)
+        """
         # create empty dictionary for constrained metabolites
         constrained_mets = {}  # keys: metabolite, values: coefficent
         fraction_reaction_mets = {}
@@ -768,6 +1121,14 @@ class CommunityModel:
         return constrained_mets
 
     def change_reaction_bounds(self, reaction: str or cobra.Reaction, lower_bound, upper_bound):
+        """
+        This function allows changing reaction bounds in the community metabolic models. It takes care of adjusting the
+        dummy metabolite stoichiometry.
+
+        :param reaction: The reaction whose bounds should be set
+        :param lower_bound: The new lower bound
+        :param upper_bound: The new upper bound
+        """
         model = self.model
 
         if isinstance(reaction, str):
@@ -836,6 +1197,15 @@ class CommunityModel:
         self.add_sink_reactions_to_metabolites(model, metabolites_needing_sink_reactions)
 
     def add_sink_reactions_to_metabolites(self, model, constraint_mets, lb=0., inplace=True):
+        """
+        Adds sink reactions for dummy metabolites.
+
+        :param model: Model to be changed
+        :param constraint_mets: Metabolites where sink reactions should be added
+        :param lb: Lower bound of the sink reaction
+        :param inplace: If true, the input model is changed, otherwise a copy is created
+        :return: If the inplace flag is set to False, the updated model is returned
+        """
         sink_max_flux = self.max_flux
 
         if sink_max_flux < 10 * self._dummy_metabolite_scaling_factor * self.max_flux:
@@ -855,6 +1225,11 @@ class CommunityModel:
             return model
 
     def merge_fraction_reactions(self, merged_model):
+        """
+        Combines the fraction reactions of each of the community members
+
+        :param merged_model: The community metabolic model to be changed
+        """
         # create f_final reaction
         # This ensures that the fractions sum up to 1
         f_final = cobra.Reaction("f_final", name="final fraction reaction")
@@ -864,6 +1239,14 @@ class CommunityModel:
         merged_model.add_reactions([f_final])
 
     def apply_fixed_growth_rate(self, flux, model=None):
+        """
+        Applies a new fixed growth rate to the model. The model needs to be in fixed growth state, to allow this
+        operation.
+
+        :param flux: The new growth rate
+        :param model: The model to update
+        :return: The updated model
+        """
         if not self.fixed_growth_rate_flag:
             print("Error: The model needs to be in fixed growth rate structure to set a fixed growth rate.")
             return
@@ -885,7 +1268,11 @@ class CommunityModel:
         model.repair()
 
     def _add_fixed_abundance_reaction(self, model):
-        # add an abundance reaction to the model for fixed abundance model structure (used later)
+        """
+        Adds an abundance reaction to the model for fixed abundance model structure.
+
+        :param model: The model to be updated
+        """
         abd_rxn = cobra.Reaction("abundance_reaction")
         abd_rxn.name = "Abundance Reaction"
         abd_rxn.bounds = (0., 0.)  # Not used in fixed growth
@@ -900,8 +1287,10 @@ class CommunityModel:
         model.add_reactions([abd_rxn])
 
     def convert_to_fixed_abundance(self, abundance_dict=None):
-        """This function changes the model structure to fixed abundance, but variable growth rate. The model is left
-        unchanged if it is already in fixed abundance structure."""
+        """
+        This function changes the model structure to fixed abundance, but variable growth rate. The model is left
+        unchanged if it is already in fixed abundance structure.
+        """
         if self.fixed_abundance_flag:
             print(f"Note: Model already has fixed abundance structure.")
             return
@@ -936,8 +1325,10 @@ class CommunityModel:
         return
 
     def apply_fixed_abundance(self, abd_dict):
-        """Applying fixed abundance to the model. This is only available if the model is in fixed abundance structure
-        (check fixed_abundance_flag)."""
+        """
+        Applying fixed abundance to the model. This is only available if the model is in fixed abundance structure
+        (check fixed_abundance_flag).
+        """
         if not self.fixed_abundance_flag:
             print("Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
                   "Convert the model to fixed abundance structure first.")
@@ -993,8 +1384,10 @@ class CommunityModel:
         return
 
     def convert_to_fixed_growth_rate(self, mu_c=None):
-        """This function changes the model structure to fixed growth rate, but variable abundance profile. The model
-        is left unchanged if it is already in fixed abundance structure."""
+        """
+        This function changes the model structure to fixed growth rate, but variable abundance profile. The model
+        is left unchanged if it is already in fixed abundance structure.
+        """
         if self.fixed_growth_rate_flag:
             print(f"Note: Model already has fixed growth rate structure.")
             return
@@ -1022,6 +1415,11 @@ class CommunityModel:
         return
 
     def generate_equal_abundance_dict(self):
+        """
+        Creates a dictionary with community member names as keys and equal fractions as values
+
+        :return: Dictionary with community member names as keys and equal fractions as values
+        """
         abundances = {}
         names = self.get_member_names()
         for name in names:
@@ -1029,12 +1427,23 @@ class CommunityModel:
         return abundances
 
     def equal_abundance(self):
+        """
+        Converts the model into fixed abundance state, if it is not already in this state and applies an abundance
+        profile of equal abundance.
+        """
         if not self.fixed_abundance_flag:
             self.convert_to_fixed_abundance()
         abundances = self.generate_equal_abundance_dict()
         self.apply_fixed_abundance(abundances)
 
     def convert_to_model_without_fraction_metabolites(self):
+        """
+        Converts the community metabolic model into an equal model, without dummy metabolites and reactions. This
+        process essentially reverses the equivalent, bound free model structure applied to the models of the community
+        members.
+
+        :return: An equal model, without dummy metabolites and reactions
+        """
         was_fixed_growth = False
         if self.fixed_growth_rate_flag:
             was_fixed_growth = True
@@ -1053,18 +1462,19 @@ class CommunityModel:
                 for metabolite, coeff in reaction.metabolites.items():
                     if "_lb" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
-                        rxn.lower_bound = -coeff
+                        rxn.lower_bound = -coeff / self._dummy_metabolite_scaling_factor
                         rxn.add_metabolites({metabolite: 0}, combine=False)
                         reaction.add_metabolites({metabolite: 0}, combine=False)
                         metabolite.remove_from_model(True)
                     elif "_ub" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
-                        rxn.upper_bound = coeff
+                        rxn.upper_bound = coeff / self._dummy_metabolite_scaling_factor
                         rxn.add_metabolites({metabolite: 0}, combine=False)
                         reaction.add_metabolites({metabolite: 0}, combine=False)
                         metabolite.remove_from_model(True)
                     elif "_f_biomass_met" in metabolite.id:
-                        rxn = model.reactions.get_by_id(metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
+                        rxn = model.reactions.get_by_id(
+                            metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
                         rxn.add_metabolites({metabolite: 0}, combine=False)
                         reaction.add_metabolites({metabolite: 0}, combine=False)
                         metabolite.remove_from_model(True)
@@ -1075,11 +1485,25 @@ class CommunityModel:
         return model
 
     def load_medium_from_file(self, file_path):
+        """
+        Loads a medium for the community metabolic model from file and sets it as the medium attribute of this object.
+        The file needs to be in the following format: A csv file with two columns separated by a comma (,). The two
+        columns are named compounds and maxFlux. The compounds columns contains the metabolite IDs of the boundary
+        metabolites as in the community metabolic model. The maxFlux column contains the maximum influx of the
+        respective value as an integer or float.
+
+        :param file_path: The path to the medium file
+        """
         # load the medium dictionary
         medium_dict = read_medium_from_file(file_path, comp=f"_{self.shared_compartment_name}")
         self.medium = medium_dict
 
     def apply_medium(self):
+        """
+        Applies the medium that is specified in the medium attribute to the community metabolic model
+
+        :return: The updated model
+        """
         test_if_medium_exists = self.medium
         medium_model = self.model
         # Exclude metabolites from the medium that are not part of the model
@@ -1100,6 +1524,12 @@ class CommunityModel:
         return medium_model
 
     def run_fba(self):
+        """
+        Optimizes the community metabolic model with flux balance analysis. Returns the flux vector of the solution as
+        a dataframe.
+
+        :return: Dataframe of the solution flux vector
+        """
         solution = self.model.optimize()
         solution_df = solution.fluxes.to_frame()
         solution_df.insert(loc=0, column='reaction', value=list(solution.fluxes.index))
@@ -1108,6 +1538,12 @@ class CommunityModel:
         return solution_df
 
     def fba_solution_flux_vector(self, file_path=""):
+        """
+        Runs flux balance analysis on the community metabolic model and saves the solution flux vector as a csv file.
+
+        :param file_path: Path of the output file
+        :return: Dataframe of the solution flux vector
+        """
         solution_df = self.run_fba()
 
         if len(file_path) > 0:
@@ -1115,34 +1551,23 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def _run_fva_with_no_medium_for_loops(self, composition_agnostic=False, loopless=False):
-        """This function is only used for finding loops. It converts the model to fixed growth rate of 0 if
-        composition agnostic is wished. All changes are reverted."""
-        fraction_of_optimum = 0.
-        model = self.model
-        model.medium = {}
-        non_fraction_reactions = model.reactions.query(lambda x: "fraction_reaction" not in x.id and not (
-                x.id[:3] == "SK_" and x.id[-3:] in ["_ub", "_lb"]))
+    def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None,
+                only_exchange_reactions=True, reactions=None):
+        """
+        Run flux variability on the community metabolic model. By default, only reactions connected to metabolites in
+        the shared exchange compartment are analysed.
 
-        if composition_agnostic:
-            if self.fixed_growth_rate_flag:
-                mu_c = self.mu_c
-                self.apply_fixed_growth_rate(0.)
-                solution_df = find_loops_in_model(model)
-                self.apply_fixed_growth_rate(mu_c)
-            else:
-                self.convert_to_fixed_growth_rate(mu_c=0.)
-                solution_df = find_loops_in_model(model)
-                self.convert_to_fixed_abundance()
-        else:
-            solution_df = find_loops_in_model(model)
-
-        solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
-        solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
-
-        return solution_df
-
-    def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None):
+        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
+        :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
+            solutions without balanced growth, i.e. different growth rate of community members.
+        :param loopless: Avoids loops in the solutions, but takes longer to compute
+        :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
+        :param only_exchange_reactions: Analyse only reactions connected to metabolites in the shared exchange
+            compartment
+        :param reactions: A list of reactions that should be analysed. This parameter is overwritten if
+            only_exchange_reactions is set to True
+        :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
+        """
         model = self.model
 
         if fva_mu_c is None and composition_agnostic:
@@ -1151,8 +1576,11 @@ class CommunityModel:
         elif fva_mu_c is not None:
             fraction_of_optimum = 1.
 
-        reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
-                                                         for met in x.metabolites.keys()]))
+        if only_exchange_reactions:
+            reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
+                                                             for met in x.metabolites.keys()]))
+        elif reactions is None:
+            reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
         if composition_agnostic:
             if self.fixed_growth_rate_flag:
@@ -1222,6 +1650,14 @@ class CommunityModel:
         return solution_df
 
     def fva_solution_flux_vector(self, file_path="", fraction_of_optimum=0.9):
+        """
+        Run flux variability analysis on the current configuration of the community metabolic model and save the
+        resulting flux ranges to a csv file.
+
+        :param file_path: The fraction of the optimal objective flux that needs to be reached
+        :param fraction_of_optimum: Path of the output file
+        :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
+        """
         solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum)
 
         if len(file_path) > 0:
@@ -1230,6 +1666,13 @@ class CommunityModel:
         return solution_df
 
     def cross_feeding_metabolites_from_fba(self):
+        """
+        Run flux balance analysis and convert the solution flux vector into a table of metabolites, including the
+        solution flux for the exchange reaction of each metabolite for every community member.
+
+        :return: A dataframe of the solution flux for the exchange reaction of each metabolite for every community
+            member
+        """
         model = self.model
 
         solution_df = self.run_fba()
@@ -1262,10 +1705,22 @@ class CommunityModel:
 
     def cross_feeding_metabolites_from_fva(self, fraction_of_optimum=0.,
                                            composition_agnostic=False, fva_mu_c=None):
+        """
+        Run flux variability analysis and convert the solution flux ranges into a table of metabolites, including the
+        solution flux ranges for the exchange reaction of each metabolite for every community member.
+
+        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
+        :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
+            solutions without balanced growth, i.e. different growth rate of community members.
+        :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
+        :return: A dataframe of the solution flux range for the exchange reaction of each metabolite for every community
+            member
+        """
         model = self.model
 
         solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum,
-                                   composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c)
+                                   composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c,
+                                   only_exchange_reactions=True)
         rows = []
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
@@ -1300,6 +1755,13 @@ class CommunityModel:
         return exchg_metabolite_df
 
     def format_exchg_rxns(self, exchg_metabolite_df):
+        """
+        Formats the solution flux dataframe of FBA or FVA to a dataframe that contains which community member consumes
+        or produces a given metabolite in the solution
+
+        :param exchg_metabolite_df: The solution flux dataframe
+        :return: The formatted dataframe
+        """
         rows = []
         member_names = self.get_member_names()
 
@@ -1307,28 +1769,56 @@ class CommunityModel:
             row_dict = {"metabolite_id": row["metabolite_id"], "metabolite_name": row["metabolite_name"],
                         "cross_feeding": row["cross_feeding"], "produced_by": [], "consumed_by": []}
             for member in member_names:
-                if row[member + "_min_flux"] < 0.:
-                    row_dict["consumed_by"].append(member)
-                if row[member + "_max_flux"] > 0.:
-                    row_dict["produced_by"].append(member)
+                if member in row.keys():
+                    if row[member] < 0.:
+                        row_dict["consumed_by"].append(member)
+                    if row[member] > 0.:
+                        row_dict["produced_by"].append(member)
+                else:
+                    if row[member + "_min_flux"] < 0.:
+                        row_dict["consumed_by"].append(member)
+                    if row[member + "_max_flux"] > 0.:
+                        row_dict["produced_by"].append(member)
             rows.append(row_dict)
         exchg_metabolite_df = pd.DataFrame(rows)
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self, fba=False, fva_mu_c=None):
+    def potential_metabolite_exchanges(self, fba=False, composition_agnostic=True, fva_mu_c=None):
+        """
+        Calculates all potentially exchanged metabolites between the community members. This can be done via flux
+        balance analysis or flux variability analysis.
+
+        :param fba: If true, flux balance analysis, otherwise flux variability analysis is used
+        :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
+            solutions without balanced growth, i.e. different growth rate of community members.
+        :param fva_mu_c: Set a temporary community growth rate for the analysis (only FVA).
+        :return: A dataframe of which metabolites are cross-fed, taken up or secreted by each community member
+        """
         # TODO: give the option to return the flux vector
         if fba:
             exchange_df = self.cross_feeding_metabolites_from_fba()
-        elif fva_mu_c is not None:
-            exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=fva_mu_c,
-                                                                  composition_agnostic=False)
+        elif composition_agnostic:
+            exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=None,
+                                                                  composition_agnostic=True)
         else:
             exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=fva_mu_c,
-                                                                  composition_agnostic=True)
+                                                                  composition_agnostic=False)
+
         return self.format_exchg_rxns(exchange_df)
 
     def report(self, verbose=True, max_reactions=5000):
+        """
+        This function gives a report on the community metabolic model. It includes information on the number of
+        metabolites, reactions and genes, the names and number of community members, the model objective and the
+        presence of mass or charge unbalanced reactions and thermodynamically infeasible cycles.
+
+        :param verbose: Prints the report
+        :param max_reactions: Excludes calculation of thermodynamically infeasible cycles from the report if the number
+            of reactions in the model exceeds the number specified in this parameter. If the parameter is set to None,
+            thermodynamically infeasible cycles are calculated regardless of model size
+        :return: A dictionary of model statistics
+        """
         report_dict = {}
         model_structure = "fixed growth rate" if self.fixed_growth_rate_flag else "fixed abundance"
         num_metabolites = len(self.model.metabolites)
@@ -1347,7 +1837,7 @@ class CommunityModel:
 
         reactions_in_loops = "NaN"
         num_loop_reactions = "NaN"
-        if num_model_reactions <= max_reactions:
+        if max_reactions is not None and num_model_reactions <= max_reactions:
             reactions_in_loops = self.get_loops()
             num_loop_reactions = len(reactions_in_loops)
         else:
@@ -1397,7 +1887,10 @@ class CommunityModel:
 
     def save(self, file_path):
         """
-        Save the community model object as a SBML file. This also includes the names of the community members and their abundance (if set).
+        Save the community model object as a SBML file. This also includes the names of the community members and their
+        abundance (if set).
+
+        :param file_path: The path to the output file
         """
         # Generate a libsbml.model object
         cobra.io.write_sbml_model(self.model, filename=file_path)
@@ -1429,7 +1922,12 @@ class CommunityModel:
 
     @classmethod
     def load(cls, file_path):
+        """
+        Loads a community metabolic model from SBML file generated by PyCoMo as CommunityModel object.
 
+        :param file_path: The path to the SBML model file
+        :return: The community metabolic model as CommunityModel object
+        """
         abundance_parameters = get_abundance_parameters_from_sbml_file(file_path)
         assert len(abundance_parameters) > 0
 
@@ -1454,6 +1952,34 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
           fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
           fva_interaction_path=None, sbml_output_file=None, return_as_cobra_model=False,
           merge_via_annotation=None):
+    """
+    This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
+    generation of community metabolic models, their analyses and can save the results of analyses as well as the model
+    to files.
+
+    :param model_folder: Path to a directory containing metabolic models to be merged into a community
+    :param models: A list of file paths to metabolic model files or a list of COBRApy model objects, to be merged into
+        a community
+    :param com_model: Path to a SBML file of a community metabolic model generated by PyCoMo
+    :param out_dir: Path to an output directory
+    :param community_name: The name of the generated community
+    :param fixed_growth_rate: Sets the community metabolic model to fixed growth state with this value as growth rate
+    :param abundance: Sets the community metabolic model to fixed abundance state. This parameter can be either None,
+        equal, or an abundance dict (community member names as keys and fractions as values).
+    :param medium: Path to a medium file to be applied to the community metabolic model
+    :param fba_solution_path: Run FBA and save the solution to this file
+    :param fva_solution_path: Run FVA and save the solution to this file
+    :param fva_solution_threshold: The fraction of the objective optimum needed to be reached in FVA
+    :param fba_interaction_path: Run FBA to calculate cross-feeding interactions and save the solution to this file
+    :param fva_interaction_path: Run FVA to calculate cross-feeding interactions and save the solution to this file
+    :param sbml_output_file: If a path is given, save the community metabolic model as SBML file
+    :param return_as_cobra_model: If true, returns the community metabolic model as COBRApy model object, otherwise as
+        PyCoMo CommunityModel object
+    :param merge_via_annotation: The database to be used for matching boundary metabolites when merging into a
+        community metabolic model. If None, matching of metabolites is done via metabolite IDs instead
+    :return: The community metabolic model, either as COBRApy model object or PyCoMo CommunityModel object (see
+        return_as_cobra_model parameter)
+    """
     com_model_obj = None
     if com_model is not None:
         # Load community model
@@ -1471,7 +1997,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         elif all(list(map(lambda x: isinstance(x, cobra.Model), models))):
             # Extract names and store in named models
             named_models = {model.name: model for model in models}
-        elif all(list(map(lambda x: isinstance(x, cobra.Model), models))):
+        elif all(list(map(lambda x: isinstance(x, str), models))):
             named_models = {}
             for model_path in models:
                 model, name = load_named_model(model_path)
@@ -1530,7 +2056,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
 
     if fva_interaction_path is not None:
         try:
-            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False)
+            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False, composition_agnostic=True)
             print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
             interaction_df.to_csv(file_path=os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
                                   index=False, float_format='%f')
@@ -1554,6 +2080,9 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
 
 
 def main():
+    """
+    The main function to be executed when PyCoMo is used via the command line.
+    """
     parser = create_arg_parser()
     args = parser.parse_args()
     args = check_args(args)

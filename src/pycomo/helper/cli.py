@@ -5,10 +5,15 @@ import argparse
 __description__ = ('A package for generating community metabolic models from single species/strain models.')
 __author__ = 'Michael Predl'
 __license__ = "MIT"
-__version__ = "0.1.1a4"
+__version__ = "0.1.1a5"
 
 
 def create_arg_parser():
+    """
+    Creates a parser object for the command line interface
+
+    :return: An argparse argument parser
+    """
     parser = argparse.ArgumentParser(prog="PyCoMo")
 
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}',
@@ -76,6 +81,14 @@ def create_arg_parser():
 
 
 def check_args(args):
+    """
+    Check whether all arguments are in correct format.
+
+    :param args:
+    :raises ValueError: This error is raised if one of the supplied arguments is not in the correct format or the
+        specified range of values
+    :return: parsed arguments
+    """
     if not os.path.isdir(args.output_dir):
         raise ValueError("The output-dir does not exist or is not a directory.")
     if args.input is None:
