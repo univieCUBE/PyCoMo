@@ -236,7 +236,8 @@ def make_model_ids_sbml_conform(model):
     for group in model.groups:
         if not group.name:
             group.name = group.id
-        group.id = make_string_sbml_id_compatible(group.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+        if group.id:
+            group.id = make_string_sbml_id_compatible(group.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
 
     rename_dict = {}
     for gene in model.genes:
