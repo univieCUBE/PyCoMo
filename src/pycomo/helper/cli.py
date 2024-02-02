@@ -3,9 +3,9 @@ import sys
 import argparse
 
 __description__ = ('A package for generating community metabolic models from single species/strain models.')
-__author__ = 'Michael Predl'
+__author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
-__version__ = "0.1.2"
+__version__ = "0.1.2a1"
 
 
 def create_arg_parser():

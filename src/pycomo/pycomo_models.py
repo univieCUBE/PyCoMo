@@ -1582,22 +1582,23 @@ class CommunityModel:
         elif reactions is None:
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
-        if composition_agnostic:
+        if fva_mu_c is not None:
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
-                self.apply_fixed_growth_rate(0.)
-                # Allow flux through the biomass reaction
-                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
+                self.apply_fixed_growth_rate(fva_mu_c)
+                if composition_agnostic:
+                    # Allow flux through the biomass reaction
+                    self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
 
-                # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
-                # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
-                # discover a superset of possible metabolite exchanges.
-                f_bio_mets = {}
-                for member_name in self.get_member_names():
-                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
-                    fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                    f_bio_mets[member_name] = fraction_met
-                    biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                    # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
+                    # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
+                    # discover a superset of possible metabolite exchanges.
+                    f_bio_mets = {}
+                    for member_name in self.get_member_names():
+                        biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                        fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                        f_bio_mets[member_name] = fraction_met
+                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
                                                                             reactions,
@@ -1605,27 +1606,29 @@ class CommunityModel:
                                                                             loopless=loopless)
 
                 # Revert changes
-                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
-                for member_name, fraction_met in f_bio_mets.items():
-                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
-                    biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
+                if composition_agnostic:
+                    self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
+                    for member_name, fraction_met in f_bio_mets.items():
+                        biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                        biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
 
                 self.apply_fixed_growth_rate(mu_c)
             else:
-                self.convert_to_fixed_growth_rate(mu_c=0.)
+                self.convert_to_fixed_growth_rate(mu_c=fva_mu_c)
 
-                # Allow flux through the biomass reaction
-                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
+                if composition_agnostic:
+                    # Allow flux through the biomass reaction
+                    self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
 
-                # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
-                # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
-                # discover a superset of possible metabolite exchanges.
-                f_bio_mets = {}
-                for member_name in self.get_member_names():
-                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
-                    fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                    f_bio_mets[member_name] = fraction_met
-                    biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                    # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
+                    # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
+                    # discover a superset of possible metabolite exchanges.
+                    f_bio_mets = {}
+                    for member_name in self.get_member_names():
+                        biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                        fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                        f_bio_mets[member_name] = fraction_met
+                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
                                                                             reactions,
@@ -1633,10 +1636,11 @@ class CommunityModel:
                                                                             loopless=loopless)
 
                 # Revert changes
-                self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
-                for member_name, fraction_met in f_bio_mets.items():
-                    biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
-                    biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
+                if composition_agnostic:
+                    self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
+                    for member_name, fraction_met in f_bio_mets.items():
+                        biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                        biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
 
                 self.convert_to_fixed_abundance()
         else:
