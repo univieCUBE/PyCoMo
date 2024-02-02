@@ -882,10 +882,12 @@ class CommunityModel:
             original_medium = self.model.medium
         no_medium = {}
         self.model.medium = no_medium
+        self.apply_medium()
 
         solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites())
 
         self.model.medium = original_medium
+        self.apply_medium()
         return solution_df[
             (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
 
