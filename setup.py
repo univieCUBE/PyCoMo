@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setup(
     name="pycomo",
-    version="0.1.3a1",
+    version="0.1.3",
     description="PyCoMo is a software package for generating and analysing compartmentalized community metabolic models",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
