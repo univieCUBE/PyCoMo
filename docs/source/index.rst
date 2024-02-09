@@ -11,6 +11,7 @@ Welcome to PyCoMo's documentation!
    :caption: Contents:
 
    classes
+   PyCoMo_basics
 
 
 
