@@ -1950,7 +1950,49 @@ class CommunityModel:
         name = constructor_args["model"].id
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
-
+    def max_growth_rate(self, minimal_abundance=0, return_abundances=False):
+            """
+            Computes the overall maximum growth rate of the community.
+    
+            :param minimal_abundance: float indicating the minimal abundance of each member in the community
+            :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at the maximum growth rate
+            """
+            # set minimal abundance of members
+            names=self.get_member_names()
+            frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
+            for frxn in frxns:
+                frxn.bounds = (minimal_abundance, 1.0)
+    
+            # set starting values
+            lb = 0
+            ub = 1000
+            result_difference = 1
+            result = 0
+            # sensitivity = 10^-4
+            while result_difference > 10**-4:
+                # calculate and set mu
+                x = (ub+lb)/2
+                self.apply_fixed_growth_rate(x)
+                # check if mu is feasible
+                feasible = self.model.slim_optimize()
+                if not np.isnan(feasible):
+                    lb = x
+                    result_difference = x-result
+                    result = x
+                else:
+                    ub = x
+    
+            # truncate result to 4 decimals
+            result = int(result * 10**4) / 10**4
+            model.apply_fixed_growth_rate(result)
+            if return_abundances:
+                fva_result = model.run_fva(only_exchange_reactions=False, reactions=frxns)
+                # create new row containing mu_max
+                new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux":[result], "max_flux":[result]})
+                # join fva_result with new row
+                result = pd.concat([fva_result, new_row], ignore_index=True)
+            return result
+    
 def doall(model_folder="", models=None, com_model=None, out_dir="", community_name="community_model",
           fixed_growth_rate=None, abundance="equal", medium=None,
           fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
