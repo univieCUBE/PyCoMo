@@ -1956,6 +1956,7 @@ class CommunityModel:
     
             :param minimal_abundance: float indicating the minimal abundance of each member in the community
             :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at the maximum growth rate
+            Returns: maximum growth rate
             """
             # set minimal abundance of members
             names=self.get_member_names()
