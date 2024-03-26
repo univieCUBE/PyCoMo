@@ -1950,44 +1950,108 @@ class CommunityModel:
         name = constructor_args["model"].id
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
-    def max_growth_rate(self, minimal_abundance=0, return_abundances=False):
+    def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
             """
             Computes the overall maximum growth rate of the community.
-    
+
             :param minimal_abundance: float indicating the minimal abundance of each member in the community
             :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at the maximum growth rate
+            :param sensitivity: How many decimal places should be calculated
             Returns: maximum growth rate
             """
             # set minimal abundance of members
             names=self.get_member_names()
             frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
+            # check that the sum of minimal abundances is not greater than 1
+            assert len(names)*minimal_abundance <=1, "sum of abundances is greater than 1"
             for frxn in frxns:
                 frxn.bounds = (minimal_abundance, 1.0)
-    
+
             # set starting values
             lb = 0
             ub = 1000
+            x = 500
             result_difference = 1
             result = 0
-            # sensitivity = 10^-4
-            while result_difference > 10**-4:
+
+            while result_difference > 10**-sensitivity:
                 # calculate and set mu
-                x = (ub+lb)/2
+                if self.fixed_abundance_flag:
+                    self.convert_to_fixed_growth_rate()
                 self.apply_fixed_growth_rate(x)
+                
+                # sometimes, through computational mistakes, a lower bound ends up smaller than the upper bound
+                # in that case, the lower bound is the maximum growth rate
+                if lb > ub:
+                    result = lb
+                    break
+
                 # check if mu is feasible
-                feasible = self.model.slim_optimize()
-                if not np.isnan(feasible):
-                    lb = x
-                    result_difference = x-result
-                    result = x
-                else:
+                try:
+                    # sometimes, a growth rate is feasible in fba but not in fva.
+                    # therefore, fva is used as the control function
+                    with np.testing.assert_no_warnings():
+                        df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
+                        
+                    # fix abundances to a point within the feasible composition space of the current mu
+                    # get name of the member for each row in the fva df
+                    member_id = [string[0:-18] for string in df["reaction_id"]]
+                    # dataframes with min and max flux values of fraction reactions
+                    lb_df = (df["min_flux"]).apply(lambda lb: lb if lb > minimal_abundance else minimal_abundance)
+                    ub_df = (df["max_flux"])
+                    # dataframe with range of possible abundances
+                    R_df = ub_df - lb_df
+                    # assert that all upper bounds are bigger than the set minimal abundance
+                    assert (ub_df > minimal_abundance).all()
+                    # assert that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
+                    assert (R_df>=0).all()
+                    # The total flexibility for different abundances
+                    Delta = 1-sum(lb_df)
+                    # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
+                    if Delta > 0:
+                        delta_df = Delta * R_df / sum(R_df)
+                        ab_df = lb_df + delta_df
+                    else:
+                        ab_df = lb_df
+                    
+                    # create an abundance dictionary
+                    abundance_dict=dict(zip(member_id, ab_df))
+                    # set abundance
+                    self.convert_to_fixed_abundance()
+                    self.apply_fixed_abundance(abundance_dict)
+
+                    # conduct fba with this composition
+                    fba_result = self.model.slim_optimize()
+
+                    # check if fba result >= x 
+                    if fba_result >= x:
+                        # fba result becomes the new x
+                        x = fba_result
+                        # adjust remaining parameters
+                        lb = x
+                        result_difference = x-result
+                        result = x
+                    else:
+                        # adjust upper bound
+                        ub = fba_result
+
+                except (AssertionError, cobra.exceptions.Infeasible):
+                    # adjust parameters in case of infeasible fva solution
                     ub = x
-    
-            # truncate result to 4 decimals
-            result = int(result * 10**4) / 10**4
-            model.apply_fixed_growth_rate(result)
+
+                # update x
+                x = (ub+lb)/2
+            
+            # truncate result
+            result = np.floor((result*10**sensitivity))/10**sensitivity
+            if self.fixed_abundance_flag:
+                self.convert_to_fixed_growth_rate()
+            # set result as growth rate
+            self.apply_fixed_growth_rate(result)
+            
             if return_abundances:
-                fva_result = model.run_fva(only_exchange_reactions=False, reactions=frxns)
+                # run fva
+                fva_result = self.run_fva(only_exchange_reactions=False, reactions=frxns,fraction_of_optimum=1)
                 # create new row containing mu_max
                 new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux":[result], "max_flux":[result]})
                 # join fva_result with new row
