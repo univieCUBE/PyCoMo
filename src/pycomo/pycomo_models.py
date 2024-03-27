@@ -15,6 +15,7 @@ from math import inf
 from typing import List
 from .helper.utils import *
 from .helper.cli import *
+import warnings
 
 
 class SingleOrganismModel:
@@ -1946,7 +1947,7 @@ class CommunityModel:
         name = constructor_args["model"].id
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
-    def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6, gurobi=False):
+    def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
             """
             Computes the overall maximum growth rate of the community.
 
@@ -1984,13 +1985,10 @@ class CommunityModel:
 
                 # check if mu is feasible
                 try:
-                    # sometimes, a growth rate is feasible in fba but not in fva.
-                    # therefore, fva is used as the control function
-                    if gurobi:
+                    # run fva
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
                         df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
-                    else:
-                        with np.testing.assert_no_warnings():
-                            df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
                     # fix abundances to a point within the feasible composition space of the current mu
                     # get name of the member for each row in the fva df
                     member_id = [string[0:-18] for string in df["reaction_id"]]
