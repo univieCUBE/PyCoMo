@@ -1581,7 +1581,6 @@ class CommunityModel:
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
-
         if fva_mu_c is not None:
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
@@ -1604,7 +1603,6 @@ class CommunityModel:
                                                                             reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
-
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1634,7 +1632,6 @@ class CommunityModel:
                                                                             reactions,
                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                             loopless=loopless)
-
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1647,10 +1644,9 @@ class CommunityModel:
             solution_df = cobra.flux_analysis.flux_variability_analysis(self.model, reactions,
                                                                         fraction_of_optimum=fraction_of_optimum,
                                                                         loopless=loopless)
-
+        
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
-
         return solution_df
 
     def fva_solution_flux_vector(self, file_path="", fraction_of_optimum=0.9):
@@ -1950,7 +1946,7 @@ class CommunityModel:
         name = constructor_args["model"].id
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
-    def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
+    def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6, gurobi=False):
             """
             Computes the overall maximum growth rate of the community.
 
@@ -1974,7 +1970,7 @@ class CommunityModel:
             result_difference = 1
             result = 0
 
-            while result_difference > 10**-sensitivity:
+            while result_difference > 10**(-sensitivity):
                 # calculate and set mu
                 if self.fixed_abundance_flag:
                     self.convert_to_fixed_growth_rate()
@@ -1990,9 +1986,11 @@ class CommunityModel:
                 try:
                     # sometimes, a growth rate is feasible in fba but not in fva.
                     # therefore, fva is used as the control function
-                    with np.testing.assert_no_warnings():
+                    if gurobi:
                         df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
-                        
+                    else:
+                        with np.testing.assert_no_warnings():
+                            df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
                     # fix abundances to a point within the feasible composition space of the current mu
                     # get name of the member for each row in the fva df
                     member_id = [string[0:-18] for string in df["reaction_id"]]
@@ -2002,7 +2000,7 @@ class CommunityModel:
                     # dataframe with range of possible abundances
                     R_df = ub_df - lb_df
                     # assert that all upper bounds are bigger than the set minimal abundance
-                    assert (ub_df > minimal_abundance).all()
+                    assert (ub_df >= minimal_abundance).all()
                     # assert that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
                     assert (R_df>=0).all()
                     # The total flexibility for different abundances
@@ -2013,7 +2011,6 @@ class CommunityModel:
                         ab_df = lb_df + delta_df
                     else:
                         ab_df = lb_df
-                    
                     # create an abundance dictionary
                     abundance_dict=dict(zip(member_id, ab_df))
                     # set abundance
@@ -2041,6 +2038,8 @@ class CommunityModel:
 
                 # update x
                 x = (ub+lb)/2
+                if ub-lb < 10**(-sensitivity):
+                    result_difference = 0
             
             # truncate result
             result = np.floor((result*10**sensitivity))/10**sensitivity
