@@ -12,6 +12,7 @@ import pandas as pd
 import libsbml
 import os
 from math import inf
+from optlang.symbolics import Zero
 from typing import List
 from .helper.utils import *
 from .helper.cli import *
@@ -886,7 +887,9 @@ class CommunityModel:
 
         solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites())
 
-        self.model.medium = original_medium
+        self.medium = original_medium
+        self.apply_medium()
+
         return solution_df[
             (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
 
@@ -1553,6 +1556,126 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
+    def _add_loopless_constraints_and_objective(self, fluxes, ko_candidates=None):
+        """
+        Converts the model into a structure that allows for the removal of futile cycles for a given solution. This is
+        achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
+        and minimizing the remaining flux values. This approach is adapted from
+        `CycleFreeFLux <https://doi.org/10.1093/bioinformatics/btv096>`_ and its implementation in COBRApy.
+
+        :param fluxes: flux vector of the solution where loops should be removed
+        :param ko_candidates: Reactions to be constrained and used in the objective (as list of reaction IDs)
+        :return: None
+        """
+        if ko_candidates is None:
+            ko_candidates = [r.id for r in self.model.reactions]
+        self.model.objective = self.model.solver.interface.Objective(
+            Zero, direction="min", sloppy=True
+        )
+        objective_vars = []
+        exchange_rxns = self.model.exchanges
+        for rxn in self.model.reactions:
+            if rxn in self.f_reactions:  # f_reactions need to remain unchanged
+                continue
+
+            flux = fluxes[rxn.id]
+            if rxn in exchange_rxns:
+                rxn.bounds = (flux, flux)
+                continue
+
+            if flux > 0:
+                rxn.bounds = max(0, rxn.lower_bound), min(flux, rxn.upper_bound)
+                if rxn.id in ko_candidates:
+                    objective_vars.append(rxn.forward_variable)
+            elif flux < 0:
+                rxn.bounds = max(flux, rxn.lower_bound), min(0, rxn.upper_bound)
+                if rxn.id in ko_candidates:
+                    objective_vars.append(rxn.reverse_variable)
+            else:
+                rxn.bounds = 0, 0
+
+        self.model.objective.set_linear_coefficients({v: 1.0 for v in objective_vars})
+        return
+
+    def loopless_fva(self, reactions, fraction_of_optimum=None, use_loop_reactions_for_ko=False, ko_candidates=None):
+        """
+        Performs flux variability analysis and removes futile cycles from the solutions. This is
+        achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
+        and minimizing the remaining flux values. This approach is adapted from
+        `CycleFreeFLux <https://doi.org/10.1093/bioinformatics/btv096>`_ and its implementation in COBRApy.
+
+        :param reactions: A list of reactions that should be analysed
+        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
+        :param use_loop_reactions_for_ko: Find loops in the model and use these reactions as ko_candidates. Overwrites
+        value in ko_candidates
+        :param ko_candidates: Reactions to be constrained and used in the objective (as list of reaction IDs)
+        :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
+        reaction IDs
+        """
+
+        with self.model:  # Revert changes to the model after fva
+
+            if use_loop_reactions_for_ko:
+                ko_candidates = list(self.get_loops()["reaction"])
+
+            if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
+                try:
+                    fraction_of_optimum = float(fraction_of_optimum)
+                    assert 0. <= fraction_of_optimum <= 1.
+                except AssertionError:
+                    print(f"Error: fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
+                          f"Continuing with fraction_of_optimum=1")
+                    fraction_of_optimum = 1.0
+
+                objective_value = self.model.slim_optimize()
+                if self.model.solver.objective.direction == "max":
+                    original_objective = self.model.problem.Variable(
+                        "original_objective",
+                        lb=fraction_of_optimum * objective_value,
+                    )
+                else:
+                    original_objective = self.model.problem.Variable(
+                        "original_objective",
+                        ub=fraction_of_optimum * objective_value,
+                    )
+                original_objective_constraint = self.model.problem.Constraint(
+                    self.model.solver.objective.expression - original_objective,
+                    lb=0,
+                    ub=0,
+                    name="original_objective_constraint",
+                )
+                self.model.add_cons_vars([original_objective, original_objective_constraint])
+
+            # Carry out fva
+            result = pd.DataFrame(
+                {
+                    "minimum": np.zeros(len(reactions), dtype=float),
+                    "maximum": np.zeros(len(reactions), dtype=float),
+                },
+                index=[rxn.id for rxn in reactions],
+            )
+            for rxn in reactions:
+                self.model.objective = rxn.id
+                solution = self.model.optimize("minimize")
+                if not solution.status == "infeasible":
+                    with self.model:
+                        self._add_loopless_constraints_and_objective(solution.fluxes, ko_candidates)
+                        solution = self.model.optimize()
+                        min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
+                else:
+                    min_flux = 0.
+                solution = self.model.optimize("maximize")
+                if not solution.status == "infeasible":
+                    with self.model:
+                        self._add_loopless_constraints_and_objective(solution.fluxes, ko_candidates)
+                        solution = self.model.optimize()
+                        max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
+                else:
+                    max_flux = 0.
+                result.at[rxn.id, "maximum"] = max_flux
+                result.at[rxn.id, "minimum"] = min_flux
+        return result
+
     def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None,
                 only_exchange_reactions=True, reactions=None):
         """
@@ -1578,11 +1701,12 @@ class CommunityModel:
         elif fva_mu_c is not None:
             fraction_of_optimum = 1.
 
-        if only_exchange_reactions:
+        if only_exchange_reactions and reactions is not None:
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
+
         if fva_mu_c is not None:
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
@@ -1601,10 +1725,16 @@ class CommunityModel:
                         f_bio_mets[member_name] = fraction_met
                         biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
-                solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
-                                                                            reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                            loopless=loopless)
+                if loopless:
+                    solution_df = self.loopless_fva(reactions,
+                                                    fraction_of_optimum=fraction_of_optimum,
+                                                    use_loop_reactions_for_ko=True)
+                else:
+                    solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
+                                                                                reactions,
+                                                                                fraction_of_optimum=fraction_of_optimum,
+                                                                                loopless=False)
+
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1630,10 +1760,15 @@ class CommunityModel:
                         f_bio_mets[member_name] = fraction_met
                         biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
-                solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
-                                                                            reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                            loopless=loopless)
+                if loopless:
+                    solution_df = self.loopless_fva(reactions,
+                                                    fraction_of_optimum=fraction_of_optimum,
+                                                    use_loop_reactions_for_ko=True)
+                else:
+                    solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
+                                                                                reactions,
+                                                                                fraction_of_optimum=fraction_of_optimum,
+                                                                                loopless=False)
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1643,9 +1778,15 @@ class CommunityModel:
 
                 self.convert_to_fixed_abundance()
         else:
-            solution_df = cobra.flux_analysis.flux_variability_analysis(self.model, reactions,
-                                                                        fraction_of_optimum=fraction_of_optimum,
-                                                                        loopless=loopless)
+            if loopless:
+                solution_df = self.loopless_fva(reactions,
+                                                fraction_of_optimum=fraction_of_optimum,
+                                                use_loop_reactions_for_ko=True)
+            else:
+                solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
+                                                                            reactions,
+                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                            loopless=False)
         
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
