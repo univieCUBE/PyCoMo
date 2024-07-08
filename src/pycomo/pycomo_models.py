@@ -881,12 +881,13 @@ class CommunityModel:
         """
         return not bool(self.get_unbalanced_reactions())
 
-    def get_loops(self):
+    def get_loops(self, processes=None):
         """
         This is a function to find closed loops that can sustain flux without any input or output. Such loops are
         thermodynamically infeasible and biologically nonsensical. Users should be aware of their presence and
         either remove them or check any model solutions for the presence of these cycles.
 
+        :param processes: The number of processes to use
         :return: A DataFrame of reactions that carry flux without any metabolite input or output in the model
         """
         try:
@@ -896,7 +897,7 @@ class CommunityModel:
         no_medium = {}
         self.model.medium = no_medium
 
-        solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites())
+        solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), processes=processes)
 
         self.medium = original_medium
         self.apply_medium()
@@ -1857,7 +1858,7 @@ class CommunityModel:
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self, fba=False, composition_agnostic=True, fva_mu_c=None, processes=processes):
+    def potential_metabolite_exchanges(self, fba=False, composition_agnostic=True, fva_mu_c=None, processes=None):
         """
         Calculates all potentially exchanged metabolites between the community members. This can be done via flux
         balance analysis or flux variability analysis.
