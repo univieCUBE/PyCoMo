@@ -16,7 +16,18 @@ from optlang.symbolics import Zero
 from typing import List
 from .helper.utils import *
 from .helper.cli import *
+from .helper.multiprocess import *
 import warnings
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.info('Logger initialized.')
 
 
 class SingleOrganismModel:
@@ -870,12 +881,13 @@ class CommunityModel:
         """
         return not bool(self.get_unbalanced_reactions())
 
-    def get_loops(self):
+    def get_loops(self, processes=None):
         """
         This is a function to find closed loops that can sustain flux without any input or output. Such loops are
         thermodynamically infeasible and biologically nonsensical. Users should be aware of their presence and
         either remove them or check any model solutions for the presence of these cycles.
 
+        :param processes: The number of processes to use
         :return: A DataFrame of reactions that carry flux without any metabolite input or output in the model
         """
         try:
@@ -885,7 +897,7 @@ class CommunityModel:
         no_medium = {}
         self.model.medium = no_medium
 
-        solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites())
+        solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), processes=processes)
 
         self.medium = original_medium
         self.apply_medium()
@@ -1267,7 +1279,11 @@ class CommunityModel:
                 fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
-                fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+                self.model.add_metabolites(fraction_met)
+                if fraction_met in fraction_rxn.metabolites:
+                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+                else:
+                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=True)
 
         model.repair()
 
@@ -1304,8 +1320,14 @@ class CommunityModel:
         # Remove the f_bio metabolites from the fraction reactions
         for member_name in self.get_member_names():
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
-            fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-            fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
+            try:
+                fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
+            except KeyError:
+                fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
+                if fraction_met in fraction_rxn.metabolites:
+                    self.model.add_metabolites(fraction_met)
+                    fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
         # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
         model.reactions.get_by_id("abundance_reaction").bounds = (0., self.max_flux)
@@ -1556,128 +1578,17 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def _add_loopless_constraints_and_objective(self, fluxes, ko_candidates=None):
-        """
-        Converts the model into a structure that allows for the removal of futile cycles for a given solution. This is
-        achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
-        and minimizing the remaining flux values. This approach is adapted from
-        `CycleFreeFLux <https://doi.org/10.1093/bioinformatics/btv096>`_ and its implementation in COBRApy.
-
-        :param fluxes: flux vector of the solution where loops should be removed
-        :param ko_candidates: Reactions to be constrained and used in the objective (as list of reaction IDs)
-        :return: None
-        """
-        if ko_candidates is None:
-            ko_candidates = [r.id for r in self.model.reactions]
-        self.model.objective = self.model.solver.interface.Objective(
-            Zero, direction="min", sloppy=True
-        )
-        objective_vars = []
-        exchange_rxns = self.model.exchanges
-        for rxn in self.model.reactions:
-            if rxn in self.f_reactions:  # f_reactions need to remain unchanged
-                continue
-
-            flux = fluxes[rxn.id]
-            if rxn in exchange_rxns:
-                rxn.bounds = (flux, flux)
-                continue
-
-            if flux > 0:
-                rxn.bounds = max(0, rxn.lower_bound), min(flux, rxn.upper_bound)
-                if rxn.id in ko_candidates:
-                    objective_vars.append(rxn.forward_variable)
-            elif flux < 0:
-                rxn.bounds = max(flux, rxn.lower_bound), min(0, rxn.upper_bound)
-                if rxn.id in ko_candidates:
-                    objective_vars.append(rxn.reverse_variable)
-            else:
-                rxn.bounds = 0, 0
-
-        self.model.objective.set_linear_coefficients({v: 1.0 for v in objective_vars})
-        return
-
-    def loopless_fva(self, reactions, fraction_of_optimum=None, use_loop_reactions_for_ko=False, ko_candidates=None):
-        """
-        Performs flux variability analysis and removes futile cycles from the solutions. This is
-        achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
-        and minimizing the remaining flux values. This approach is adapted from
-        `CycleFreeFLux <https://doi.org/10.1093/bioinformatics/btv096>`_ and its implementation in COBRApy.
-
-        :param reactions: A list of reactions that should be analysed
-        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
-        :param use_loop_reactions_for_ko: Find loops in the model and use these reactions as ko_candidates. Overwrites
-        value in ko_candidates
-        :param ko_candidates: Reactions to be constrained and used in the objective (as list of reaction IDs)
-        :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
-        reaction IDs
-        """
-
-        with self.model:  # Revert changes to the model after fva
-
-            if use_loop_reactions_for_ko:
-                ko_candidates = list(self.get_loops()["reaction"])
-
-            if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
-                try:
-                    fraction_of_optimum = float(fraction_of_optimum)
-                    assert 0. <= fraction_of_optimum <= 1.
-                except AssertionError:
-                    print(f"Error: fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
-                          f"Continuing with fraction_of_optimum=1")
-                    fraction_of_optimum = 1.0
-
-                objective_value = self.model.slim_optimize()
-                if self.model.solver.objective.direction == "max":
-                    original_objective = self.model.problem.Variable(
-                        "original_objective",
-                        lb=fraction_of_optimum * objective_value,
-                    )
-                else:
-                    original_objective = self.model.problem.Variable(
-                        "original_objective",
-                        ub=fraction_of_optimum * objective_value,
-                    )
-                original_objective_constraint = self.model.problem.Constraint(
-                    self.model.solver.objective.expression - original_objective,
-                    lb=0,
-                    ub=0,
-                    name="original_objective_constraint",
-                )
-                self.model.add_cons_vars([original_objective, original_objective_constraint])
-
-            # Carry out fva
-            result = pd.DataFrame(
-                {
-                    "minimum": np.zeros(len(reactions), dtype=float),
-                    "maximum": np.zeros(len(reactions), dtype=float),
-                },
-                index=[rxn.id for rxn in reactions],
-            )
-            for rxn in reactions:
-                self.model.objective = rxn.id
-                solution = self.model.optimize("minimize")
-                if not solution.status == "infeasible":
-                    with self.model:
-                        self._add_loopless_constraints_and_objective(solution.fluxes, ko_candidates)
-                        solution = self.model.optimize()
-                        min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
-                else:
-                    min_flux = 0.
-                solution = self.model.optimize("maximize")
-                if not solution.status == "infeasible":
-                    with self.model:
-                        self._add_loopless_constraints_and_objective(solution.fluxes, ko_candidates)
-                        solution = self.model.optimize()
-                        max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
-                else:
-                    max_flux = 0.
-                result.at[rxn.id, "maximum"] = max_flux
-                result.at[rxn.id, "minimum"] = min_flux
-        return result
+    def loopless_fva(self, reaction_ids, fraction_of_optimum=None, use_loop_reactions_for_ko=True, ko_candidate_ids=None, verbose=False, processes=None):
+        return loopless_fva(self,
+                            reaction_ids,
+                            fraction_of_optimum=fraction_of_optimum,
+                            use_loop_reactions_for_ko=use_loop_reactions_for_ko,
+                            ko_candidate_ids=ko_candidate_ids,
+                            verbose=verbose,
+                            processes=None)
 
     def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None,
-                only_exchange_reactions=True, reactions=None):
+                only_exchange_reactions=True, reactions=None, verbose=False, processes=None):
         """
         Run flux variability on the community metabolic model. By default, only reactions connected to metabolites in
         the shared exchange compartment are analysed.
@@ -1691,6 +1602,7 @@ class CommunityModel:
             compartment
         :param reactions: A list of reactions that should be analysed. This parameter is overwritten if
             only_exchange_reactions is set to True
+        :param verbose: Print progress of loopless FVA
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
         model = self.model
@@ -1701,10 +1613,12 @@ class CommunityModel:
         elif fva_mu_c is not None:
             fraction_of_optimum = 1.
 
-        if only_exchange_reactions and reactions is not None:
+        if only_exchange_reactions:
+            if verbose: logger.info(f"Setting reactions to be analysed to exchange reactions only")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
+            if verbose: logger.info(f"Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
         if fva_mu_c is not None:
@@ -1726,14 +1640,19 @@ class CommunityModel:
                         biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 if loopless:
+                    if verbose: logger.info(f"Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
-                                                    use_loop_reactions_for_ko=True)
+                                                    use_loop_reactions_for_ko=True,
+                                                    verbose=verbose,
+                                                    processes=processes)
                 else:
-                    solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
+                    if verbose: logger.info(f"Running FVA")
+                    solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
                                                                                 reactions,
                                                                                 fraction_of_optimum=fraction_of_optimum,
-                                                                                loopless=False)
+                                                                                loopless=False,
+                                                                                processes=processes)
 
                 # Revert changes
                 if composition_agnostic:
@@ -1761,14 +1680,19 @@ class CommunityModel:
                         biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 if loopless:
+                    if verbose: logger.info(f"Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
-                                                    fraction_of_optimum=fraction_of_optimum,
-                                                    use_loop_reactions_for_ko=True)
+                                               fraction_of_optimum=fraction_of_optimum,
+                                               use_loop_reactions_for_ko=True,
+                                               verbose=verbose,
+                                               processes=processes)
                 else:
-                    solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
+                    if verbose: logger.info(f"Running FVA")
+                    solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
                                                                                 reactions,
                                                                                 fraction_of_optimum=fraction_of_optimum,
-                                                                                loopless=False)
+                                                                                loopless=False,
+                                                                                processes=processes)
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1779,29 +1703,35 @@ class CommunityModel:
                 self.convert_to_fixed_abundance()
         else:
             if loopless:
+                if verbose: logger.info(f"Running loopless FVA")
                 solution_df = self.loopless_fva(reactions,
-                                                fraction_of_optimum=fraction_of_optimum,
-                                                use_loop_reactions_for_ko=True)
+                                           fraction_of_optimum=fraction_of_optimum,
+                                           use_loop_reactions_for_ko=True,
+                                           verbose=verbose,
+                                           processes=processes)
             else:
-                solution_df = cobra.flux_analysis.flux_variability_analysis(self.model,
-                                                                            reactions,
-                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                            loopless=False)
+                if verbose: logger.info(f"Running FVA")
+                solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
+                                                                     reactions,
+                                                                     fraction_of_optimum=fraction_of_optimum,
+                                                                     loopless=False,
+                                                                     processes=processes)
         
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
         return solution_df
 
-    def fva_solution_flux_vector(self, file_path="", fraction_of_optimum=0.9):
+    def fva_solution_flux_vector(self, file_path="", fraction_of_optimum=0.9, processes=None):
         """
         Run flux variability analysis on the current configuration of the community metabolic model and save the
         resulting flux ranges to a csv file.
 
         :param file_path: The fraction of the optimal objective flux that needs to be reached
         :param fraction_of_optimum: Path of the output file
+        :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
-        solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum)
+        solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum, processes=processes)
 
         if len(file_path) > 0:
             print(f"Saving flux vector to {file_path}")
@@ -1847,7 +1777,7 @@ class CommunityModel:
         return exchg_metabolite_df
 
     def cross_feeding_metabolites_from_fva(self, fraction_of_optimum=0.,
-                                           composition_agnostic=False, fva_mu_c=None):
+                                           composition_agnostic=False, fva_mu_c=None, processes=None):
         """
         Run flux variability analysis and convert the solution flux ranges into a table of metabolites, including the
         solution flux ranges for the exchange reaction of each metabolite for every community member.
@@ -1856,6 +1786,7 @@ class CommunityModel:
         :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
             solutions without balanced growth, i.e. different growth rate of community members.
         :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
+        :param processes: The number of processes to use
         :return: A dataframe of the solution flux range for the exchange reaction of each metabolite for every community
             member
         """
@@ -1863,7 +1794,7 @@ class CommunityModel:
 
         solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum,
                                    composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c,
-                                   only_exchange_reactions=True)
+                                   only_exchange_reactions=True, processes=processes)
         rows = []
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
@@ -1927,7 +1858,7 @@ class CommunityModel:
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self, fba=False, composition_agnostic=True, fva_mu_c=None):
+    def potential_metabolite_exchanges(self, fba=False, composition_agnostic=True, fva_mu_c=None, processes=None):
         """
         Calculates all potentially exchanged metabolites between the community members. This can be done via flux
         balance analysis or flux variability analysis.
@@ -1936,6 +1867,7 @@ class CommunityModel:
         :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
             solutions without balanced growth, i.e. different growth rate of community members.
         :param fva_mu_c: Set a temporary community growth rate for the analysis (only FVA).
+        :param processes: The number of processes to use (only FVA)
         :return: A dataframe of which metabolites are cross-fed, taken up or secreted by each community member
         """
         # TODO: give the option to return the flux vector
@@ -1943,10 +1875,12 @@ class CommunityModel:
             exchange_df = self.cross_feeding_metabolites_from_fba()
         elif composition_agnostic:
             exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=None,
-                                                                  composition_agnostic=True)
+                                                                  composition_agnostic=True,
+                                                                  processes=processes)
         else:
             exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=fva_mu_c,
-                                                                  composition_agnostic=False)
+                                                                  composition_agnostic=False,
+                                                                  processes=processes)
 
         return self.format_exchg_rxns(exchange_df)
 
@@ -2219,7 +2153,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
           fixed_growth_rate=None, abundance="equal", medium=None,
           fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
           fva_interaction_path=None, sbml_output_file=None, return_as_cobra_model=False,
-          merge_via_annotation=None):
+          merge_via_annotation=None, num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
     generation of community metabolic models, their analyses and can save the results of analyses as well as the model
@@ -2240,11 +2174,12 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     :param fva_solution_threshold: The fraction of the objective optimum needed to be reached in FVA
     :param fba_interaction_path: Run FBA to calculate cross-feeding interactions and save the solution to this file
     :param fva_interaction_path: Run FVA to calculate cross-feeding interactions and save the solution to this file
-    :param sbml_output_file: If a path is given, save the community metabolic model as SBML file
+    :param sbml_output_file: If a filename is given, save the community metabolic model as SBML file
     :param return_as_cobra_model: If true, returns the community metabolic model as COBRApy model object, otherwise as
         PyCoMo CommunityModel object
     :param merge_via_annotation: The database to be used for matching boundary metabolites when merging into a
         community metabolic model. If None, matching of metabolites is done via metabolite IDs instead
+    :param num_cores: The number of cores to use in flux variability analysis
     :return: The community metabolic model, either as COBRApy model object or PyCoMo CommunityModel object (see
         return_as_cobra_model parameter)
     """
@@ -2318,13 +2253,16 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     if fva_solution_path is not None:
         try:
             com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_path),
-                                                   fraction_of_optimum=fva_solution_threshold)
+                                                   fraction_of_optimum=fva_solution_threshold,
+                                                   processes=num_cores)
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
 
     if fva_interaction_path is not None:
         try:
-            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False, composition_agnostic=True)
+            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False,
+                                                                          composition_agnostic=True,
+                                                                          processes=num_cores)
             print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
             interaction_df.to_csv(file_path=os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
                                   index=False, float_format='%f')

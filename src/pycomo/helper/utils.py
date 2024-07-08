@@ -6,6 +6,10 @@ import cobra
 import libsbml
 import os
 import re
+from cobra.util.process_pool import ProcessPool
+from cobra.core import Configuration
+
+configuration = Configuration()
 
 
 def make_string_sbml_id_compatible(string, remove_ascii_escapes=False, remove_trailing_underscore=False):
@@ -518,6 +522,17 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
     return metabolites_without_overlap
 
 
+def get_f_reactions(model):
+    """
+    Get the IDs of all fraction reactionsm in a PyCoMo community metabolic model.
+
+    :param model: A PyCoMo community metabolic model
+    :return: A set of all fraction reactions
+    """
+    return model.reactions.query(
+        lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+
+
 def relax_reaction_constraints_for_zero_flux(model):
     """
     This function relaxes all constraints of a model to allow a flux of 0 in all reactions.
@@ -531,25 +546,66 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def find_loops_in_model(model):
+def _init_loop_worker(model):
+    """
+    Initialize a global model object for multiprocessing.
+
+    :param model: The model to perform find loops in
+    """
+
+    global _model
+    _model = model
+
+
+def _find_loop_step(rxn_id):
+    rxn = _model.reactions.get_by_id(rxn_id)
+    _model.objective = rxn.id
+    solution = _model.optimize("minimize")
+    min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+    solution = _model.optimize("maximize")
+    max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+    return rxn_id, max_flux, min_flux
+
+
+def find_loops_in_model(model, processes=None):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
 
     :param model: Model to be searched for thermodynamically infeasible cycles
+    :param processes: The number of processes to use
     :return: A dataframe of reactions and their flux range, if they can carry non-zero flux without metabolite input
     """
     loop_model = model.copy()
     loop_model.medium = {}
     relax_reaction_constraints_for_zero_flux(loop_model)
     loops = []
-    for rxn in loop_model.reactions:
-        loop_model.objective = rxn.id
-        solution = loop_model.optimize("minimize")
-        min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        solution = loop_model.optimize("maximize")
-        max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if min_flux != 0. or max_flux != 0.:
-            loops.append({"reaction": rxn.id, "min_flux": min_flux, "max_flux": max_flux})
+    reaction_ids = [r.id for r in loop_model.reactions]
+
+    num_rxns = len(reaction_ids)
+
+    if processes is None:
+        processes = configuration.processes
+
+    processes = min(processes, num_rxns)
+
+    if processes > 1:
+        chunk_size = len(reaction_ids) // processes
+        with ProcessPool(
+                processes,
+                initializer=_init_loop_worker,
+                initargs=(tuple([loop_model])),
+        ) as pool:
+            for rxn_id, max_flux, min_flux in pool.imap_unordered(
+                    _find_loop_step, reaction_ids, chunksize=chunk_size
+            ):
+                if min_flux != 0. or max_flux != 0.:
+                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+    else:
+        _init_loop_worker(tuple([loop_model]))
+        for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+            if min_flux != 0. or max_flux != 0.:
+                loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+
     loops_df = pd.DataFrame(loops)
     return loops_df
