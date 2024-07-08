@@ -6,6 +6,10 @@ import cobra
 import libsbml
 import os
 import re
+from .process_pool import ProcessPool
+from cobra.core import Configuration
+
+configuration = Configuration()
 
 
 def make_string_sbml_id_compatible(string, remove_ascii_escapes=False, remove_trailing_underscore=False):
@@ -531,7 +535,34 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def find_loops_in_model(model):
+def _init_loop_worker(model: "Model") -> None:
+    """Initialize a global model object for multiprocessing.
+
+    Parameters
+    ----------
+    model: cobra.Model
+        The model to operate on.
+    loopless: bool
+        Whether to use loopless version.
+    sense: {"max", "min"}
+        Whether to maximise or minimise objective.
+
+    """
+    global _model
+    _model = model
+
+
+def _find_loop_step(rxn_id):
+    rxn = _model.reactions.get_by_id(rxn_id)
+    _model.objective = rxn.id
+    solution = _model.optimize("minimize")
+    min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+    solution = _model.optimize("maximize")
+    max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+    return rxn_id, max_flux, min_flux
+
+
+def find_loops_in_model(model, processes=None):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
@@ -543,13 +574,38 @@ def find_loops_in_model(model):
     loop_model.medium = {}
     relax_reaction_constraints_for_zero_flux(loop_model)
     loops = []
-    for rxn in loop_model.reactions:
-        loop_model.objective = rxn.id
-        solution = loop_model.optimize("minimize")
-        min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        solution = loop_model.optimize("maximize")
-        max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if min_flux != 0. or max_flux != 0.:
-            loops.append({"reaction": rxn.id, "min_flux": min_flux, "max_flux": max_flux})
+    reaction_ids = [r.id for r in loop_model.reactions]
+
+    num_rxns = len(reaction_ids)
+
+    # Transform into loopless fva step
+    # Establish process pool (from cobra)
+
+    if processes is None:
+        processes = configuration.processes
+
+    processes = min(processes, num_rxns)
+
+    if processes > 1:
+        # We create and destroy a new pool here in order to set the
+        # objective direction for all reactions. This creates a
+        # slight overhead but seems the most clean.
+        chunk_size = len(reaction_ids) // processes
+        with ProcessPool(
+                processes,
+                initializer=_init_loop_worker,
+                initargs=(tuple([loop_model])),
+        ) as pool:
+            for rxn_id, max_flux, min_flux in pool.imap_unordered(
+                    _find_loop_step, reaction_ids, chunksize=chunk_size
+            ):
+                if min_flux != 0. or max_flux != 0.:
+                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+    else:
+        _init_loop_worker(tuple([loop_model]))
+        for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+            if min_flux != 0. or max_flux != 0.:
+                loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+
     loops_df = pd.DataFrame(loops)
     return loops_df
