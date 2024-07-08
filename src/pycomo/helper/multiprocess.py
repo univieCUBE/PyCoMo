@@ -127,26 +127,28 @@ def _loopless_fva_step(rxn_id):
     solution = _model.optimize("minimize")
     if not solution.status == "infeasible":
         if perform_loopless_on_rxn:
-            logger.debug("Starting loop correction")
+            logger.debug(f"{rxn.id} Starting loop correction")
             with _model:
                 _add_loopless_constraints_and_objective(solution.fluxes)
-                logger.debug("Optimize for loopless flux")
+                logger.debug(f"{rxn.id} Optimize for loopless flux")
                 solution = _model.optimize()
-                logger.debug("Optimization for loopless flux finished")
+                logger.debug(f"{rxn.id} Optimization for loopless flux finished")
         min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
     else:
+        logger.debug(f"{rxn.id} min flux is infeasible")
         min_flux = 0.
     solution = _model.optimize("maximize")
     if not solution.status == "infeasible":
         if perform_loopless_on_rxn:
-            logger.debug("Starting loop correction")
+            logger.debug(f"{rxn.id} Starting loop correction")
             with _model:
                 _add_loopless_constraints_and_objective(solution.fluxes)
-                logger.debug("Optimize for loopless flux")
+                logger.debug(f"{rxn.id} Optimize for loopless flux")
                 solution = _model.optimize()
-                logger.debug("Optimization for loopless flux finished")
+                logger.debug(f"{rxn.id} Optimization for loopless flux finished")
         max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
     else:
+        logger.debug(f"{rxn.id} max flux is infeasible")
         max_flux = 0.
     return rxn_id, max_flux, min_flux
 

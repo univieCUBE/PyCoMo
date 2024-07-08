@@ -304,7 +304,7 @@ class SingleOrganismModel:
         mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - {self.biomass_met})
         return mets_without_exchg
 
-    def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True):
+    def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
         """
         When preprocessing the model for merging into a community metabolic model, a new shared compartment is added.
         This new compartment will be the compartment for boundary metabolites, containing all metabolites with exchange
@@ -314,6 +314,7 @@ class SingleOrganismModel:
         :param model: The model to be changed
         :param old_comp: The ID of the old exchange compartment
         :param inplace: If True, the input model will be changed, else a copy is made
+        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transport reactions)
         :return: None if the inplace flag is set, otherwise the model with changed reactions
         """
         if not inplace:
@@ -335,6 +336,7 @@ class SingleOrganismModel:
                 rxn.add_metabolites(new_met_stoich)
                 if "Exchange" in rxn.name:
                     rxn.name = rxn.name.replace("Exchange", "Transport")
+                rxn.bounds = (-max_flux, max_flux)
 
         model.repair()
 
@@ -423,7 +425,8 @@ class SingleOrganismModel:
 
         return model
 
-    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True):
+    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True,
+                                 max_flux=1000.):
         """
         Add a new exchange compartment. This will also copy all metabolites in the current external compartment to the
         exchange compartment, establish transport reactions between the two compartments for all metabolites and add
@@ -434,6 +437,7 @@ class SingleOrganismModel:
         :param add_missing_transports: If True, add exchange reactions and transport reactions for all metabolites in
             the old external compartment that did not have any exchange reactions
         :param inplace: If True, the input model will be changed, else a copy is made
+        :param max_flux: Maximum allowed flux
         :return: Updated model
         """
         if exchg_comp_name is None:
@@ -448,7 +452,7 @@ class SingleOrganismModel:
         if add_missing_transports:
             mets_without_exchg = self.find_metabolites_without_exchange_rxn(model)
             self.add_exchange_reactions_to_metabolites(model, mets_without_exchg, inplace=True)
-        self.convert_exchange_to_transport_reaction(model, old_exc_comp, inplace=True)
+        self.convert_exchange_to_transport_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
         # Add exchange reactions
         self.add_exchange_reactions_to_compartment(model, exchg_comp_name, inplace=True)
 
@@ -541,7 +545,7 @@ class SingleOrganismModel:
                 reaction.remove_from_model(remove_orphans=True)
         return
 
-    def prepare_for_merging(self, shared_compartment_name=None):
+    def prepare_for_merging(self, shared_compartment_name=None, max_flux=1000.):
         """
         Prepares the model for merging into a community metabolic model. The generated model is SBML conform and all
         genes, reactions, compartments and metabolites contain the information that they belong to this model (which is
@@ -554,6 +558,7 @@ class SingleOrganismModel:
         - Prefix all compartments, genes, reactions and metabolites with the name of the model
 
         :param shared_compartment_name: The ID of the new shared exchange compartment
+        :param max_flux: Maximum allowed flux
         :return: The model prepared for merging
         """
         if shared_compartment_name is not None:
@@ -573,7 +578,7 @@ class SingleOrganismModel:
         for comp in self.prepared_model.compartments:
             rename[comp] = self.name + "_" + comp
         self.rename_compartment(self.prepared_model, rename)
-        self.add_exchange_compartment(self.prepared_model, add_missing_transports=True)
+        self.add_exchange_compartment(self.prepared_model, add_missing_transports=True, max_flux=max_flux)
         self.prefix_metabolite_names(self.prepared_model, self.name + "_",
                                      exclude_compartment=self.shared_compartment_name)
         self.prefix_reaction_names(self.prepared_model, self.name + "_",
@@ -897,7 +902,8 @@ class CommunityModel:
         no_medium = {}
         self.model.medium = no_medium
 
-        solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), processes=processes)
+        with self.model:
+            solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), processes=processes)
 
         self.medium = original_medium
         self.apply_medium()
@@ -981,7 +987,8 @@ class CommunityModel:
         for model in self.member_models:
             idx += 1
             if idx == 1:
-                merged_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name)
+                merged_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name,
+                                                         max_flux=self.max_flux)
                 biomass_met_id = model.biomass_met.id
                 biomass_met = merged_model.metabolites.get_by_id(biomass_met_id)
                 biomass_mets[model.name] = biomass_met
@@ -992,7 +999,8 @@ class CommunityModel:
                 self.create_fraction_reaction(merged_model, member_name=model.name)
 
             else:
-                extended_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name)
+                extended_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name,
+                                                           max_flux=self.max_flux)
 
                 unbalanced_metabolites = check_mass_balance_of_metabolites_with_identical_id(extended_model,
                                                                                              merged_model)
@@ -1585,7 +1593,7 @@ class CommunityModel:
                             use_loop_reactions_for_ko=use_loop_reactions_for_ko,
                             ko_candidate_ids=ko_candidate_ids,
                             verbose=verbose,
-                            processes=None)
+                            processes=processes)
 
     def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None,
                 only_exchange_reactions=True, reactions=None, verbose=False, processes=None):
@@ -1659,7 +1667,7 @@ class CommunityModel:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
                     for member_name, fraction_met in f_bio_mets.items():
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
-                        biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
+                        biomass_rxn.add_metabolites({fraction_met: -1}, combine=True)
 
                 self.apply_fixed_growth_rate(mu_c)
             else:
@@ -1698,7 +1706,7 @@ class CommunityModel:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
                     for member_name, fraction_met in f_bio_mets.items():
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
-                        biomass_rxn.add_metabolites({fraction_met: -1}, combine=False)
+                        biomass_rxn.add_metabolites({fraction_met: -1}, combine=True)
 
                 self.convert_to_fixed_abundance()
         else:
