@@ -522,6 +522,17 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
     return metabolites_without_overlap
 
 
+def get_f_reactions(model):
+    """
+    Get the IDs of all fraction reactionsm in a PyCoMo community metabolic model.
+
+    :param model: A PyCoMo community metabolic model
+    :return: A set of all fraction reactions
+    """
+    return model.reactions.query(
+        lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+
+
 def relax_reaction_constraints_for_zero_flux(model):
     """
     This function relaxes all constraints of a model to allow a flux of 0 in all reactions.
@@ -535,19 +546,13 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def _init_loop_worker(model: "Model") -> None:
-    """Initialize a global model object for multiprocessing.
-
-    Parameters
-    ----------
-    model: cobra.Model
-        The model to operate on.
-    loopless: bool
-        Whether to use loopless version.
-    sense: {"max", "min"}
-        Whether to maximise or minimise objective.
-
+def _init_loop_worker(model):
     """
+    Initialize a global model object for multiprocessing.
+
+    :param model: The model to perform find loops in
+    """
+
     global _model
     _model = model
 
@@ -568,6 +573,7 @@ def find_loops_in_model(model, processes=None):
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
 
     :param model: Model to be searched for thermodynamically infeasible cycles
+    :param processes: The number of processes to use
     :return: A dataframe of reactions and their flux range, if they can carry non-zero flux without metabolite input
     """
     loop_model = model.copy()
@@ -578,18 +584,12 @@ def find_loops_in_model(model, processes=None):
 
     num_rxns = len(reaction_ids)
 
-    # Transform into loopless fva step
-    # Establish process pool (from cobra)
-
     if processes is None:
         processes = configuration.processes
 
     processes = min(processes, num_rxns)
 
     if processes > 1:
-        # We create and destroy a new pool here in order to set the
-        # objective direction for all reactions. This creates a
-        # slight overhead but seems the most clean.
         chunk_size = len(reaction_ids) // processes
         with ProcessPool(
                 processes,
