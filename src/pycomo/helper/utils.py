@@ -6,7 +6,7 @@ import cobra
 import libsbml
 import os
 import re
-from .process_pool import ProcessPool
+from cobra.util.process_pool import ProcessPool
 from cobra.core import Configuration
 
 configuration = Configuration()
