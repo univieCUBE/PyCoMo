@@ -51,6 +51,9 @@ def create_arg_parser():
                               help="the medium to be used in the community model, as a comma separated file "
                                    "containing a column 'compounds' and a column 'maxFlux'.")
 
+    pg_com_model.add_argument('--num-cores', type=int,
+                              help="the number of cores to be used for FVA")
+
     # All parameters regarding outputs to be produced
     pg_output = parser.add_argument_group('Output parameters')
 
@@ -100,9 +103,9 @@ def check_args(args):
         if not 0. <= args.fva_flux <= 1.:
             raise ValueError("The fva-flux argument needs to be between 0. and 1. (inclusive).")
 
-    if args.fva_flux is not None:
-        if not 0. <= args.fva_flux <= 1.:
-            raise ValueError("The fva-flux argument needs to be between 0. and 1. (inclusive).")
+    if args.num_cores is not None:
+        if not 0 < args.num_cores:
+            raise ValueError("The number of cores must be greater than 0.")
 
     if args.abd_file is not None and not os.path.isfile(args.abd_file):
         raise ValueError("The abundance file is not a file or does not exist")

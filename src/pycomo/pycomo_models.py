@@ -2312,7 +2312,8 @@ def main():
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
               fva_interaction_path=args.fva_interaction_path,
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
-              merge_via_annotation=args.match_via_annotation)
+              merge_via_annotation=args.match_via_annotation,
+              num_cores=args.num_cores)
 
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
         doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
@@ -2321,7 +2322,8 @@ def main():
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
               fva_interaction_path=args.fva_interaction_path,
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
-              merge_via_annotation=args.match_via_annotation)
+              merge_via_annotation=args.match_via_annotation,
+              num_cores=args.num_cores)
     else:
         doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
               medium=args.medium,
@@ -2329,7 +2331,8 @@ def main():
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
               fva_interaction_path=args.fva_interaction_path,
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
-              merge_via_annotation=args.match_via_annotation)
+              merge_via_annotation=args.match_via_annotation,
+              num_cores=args.num_cores)
 
     print("All done!")
     sys.exit(0)
