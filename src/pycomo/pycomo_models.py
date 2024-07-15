@@ -2272,7 +2272,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
                                                                           composition_agnostic=True,
                                                                           processes=num_cores)
             print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
-            interaction_df.to_csv(file_path=os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
+            interaction_df.to_csv(os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
@@ -2281,7 +2281,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         try:
             interaction_df = com_model_obj.potential_metabolite_exchanges(fba=True)
             print(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_path)}")
-            interaction_df.to_csv(file_path=os.path.join(out_dir, fba_interaction_path), sep="\t", header=True,
+            interaction_df.to_csv(os.path.join(out_dir, fba_interaction_path), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
