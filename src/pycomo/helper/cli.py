@@ -60,6 +60,9 @@ def create_arg_parser():
     pg_output.add_argument('-o', '--output-dir', default=os.getcwd(), type=str,
                            help="the output directory to store results (default is the current working directory)")
 
+    pg_output.add_argument('--save-sbml', action='store_true', default=False,
+                           help="save the community metabolic model as sbml file")
+
     pg_output.add_argument('--fba-flux', action='store_true',
                            help="run FBA on the community model and store the flux vector in a file")
 
@@ -142,6 +145,8 @@ def check_args(args):
     if args.fva_interaction:
         args.fva_interaction_path = os.path.join(args.output_dir, f"{args.name}_fva_interaction_flux.csv")
 
-    args.sbml_output_path = os.path.join(args.output_dir, f"{args.name}.xml")
+    args.sbml_output_path = None
+    if args.save_sbml:
+        args.sbml_output_path = os.path.join(args.output_dir, f"{args.name}.xml")
 
     return args
