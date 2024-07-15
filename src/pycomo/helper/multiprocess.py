@@ -121,7 +121,8 @@ def _loopless_fva_step(rxn_id):
     elif rxn.boundary:
         perform_loopless_on_rxn = False
 
-    if perform_loopless_on_rxn: logger.info(f"Loop correction will be applied on {rxn.id}")
+    if perform_loopless_on_rxn:
+        logger.info(f"Loop correction will be applied on {rxn.id}")
 
     _model.objective = rxn.id
     solution = _model.optimize("minimize")
@@ -153,7 +154,13 @@ def _loopless_fva_step(rxn_id):
     return rxn_id, max_flux, min_flux
 
 
-def loopless_fva(pycomo_model, reactions, fraction_of_optimum=None, use_loop_reactions_for_ko=True, ko_candidate_ids=None, verbose=False, processes=None):
+def loopless_fva(pycomo_model,
+                 reactions,
+                 fraction_of_optimum=None,
+                 use_loop_reactions_for_ko=True,
+                 ko_candidate_ids=None,
+                 verbose=False,
+                 processes=None):
     """
     Performs flux variability analysis and removes futile cycles from the solutions. This is
     achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
@@ -172,22 +179,28 @@ def loopless_fva(pycomo_model, reactions, fraction_of_optimum=None, use_loop_rea
     reaction IDs
     """
 
-    if verbose: logger.info("Starting loopless FVA")
-    if verbose: logger.info("Preparing model")
+    if verbose:
+        logger.info("Starting loopless FVA")
+    if verbose:
+        logger.info("Preparing model")
 
     reaction_ids = [r.id for r in reactions]
 
     with pycomo_model.model:  # Revert changes to the model after fva
-        if verbose: logger.info("Model prepared")
+        if verbose:
+            logger.info("Model prepared")
         if use_loop_reactions_for_ko:
-            if verbose: logger.info("Searching for reactions that are part of loops")
+            if verbose:
+                logger.info("Searching for reactions that are part of loops")
             ko_candidate_ids = list(pycomo_model.get_loops()["reaction"])
-            if verbose: logger.info(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
+            if verbose:
+                logger.info(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
         elif ko_candidate_ids is None:
             ko_candidate_ids = [r.id for r in pycomo_model.model.reactions]
 
         if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
-            if verbose: logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum*100}%")
+            if verbose:
+                logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum*100}%")
             try:
                 fraction_of_optimum = float(fraction_of_optimum)
                 assert 0. <= fraction_of_optimum <= 1.

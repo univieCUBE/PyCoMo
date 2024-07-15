@@ -3,7 +3,6 @@ This module contains some utility function related to cobrapy community models.
 """
 import pandas as pd
 import cobra
-import libsbml
 import os
 import re
 from cobra.util.process_pool import ProcessPool
@@ -113,46 +112,46 @@ def read_abundance_from_file(file):
     return abd_dict
 
 
-def load_named_model(file, format="sbml"):
+def load_named_model(file, file_format="sbml"):
     """
     Loads a metabolic model from file and returns the model together with the model file name as name.
 
     :param file: Path to the model file
-    :param format: The file format of the model. Supported formats are sbml, json, mat and yaml/yml
+    :param file_format: The file format of the model. Supported formats are sbml, json, mat and yaml/yml
     :return: the metabolic model as COBRApy model and the model name
     """
     name = os.path.split(file)[1].replace(str(os.path.splitext(file)[1]), "")
-    if format == "sbml":
+    if file_format == "sbml":
         model = cobra.io.read_sbml_model(file)
-    elif format == "json":
+    elif file_format == "json":
         model = cobra.io.load_json_model(file)
-    elif format == "mat":
+    elif file_format == "mat":
         model = cobra.io.load_matlab_model(file)
-    elif format in ["yaml", "yml"]:
+    elif file_format in ["yaml", "yml"]:
         model = cobra.io.load_yaml_model(file)
     else:
         raise ValueError(f"Incorrect format for model. Please use either sbml or json.")
     return model, name
 
 
-def load_named_models_from_dir(path, format="sbml"):
+def load_named_models_from_dir(path, file_format="sbml"):
     """
     Loads all metabolic models from file in the specified directory and of given format. Supported formats are sbml,
     json, mat and yaml/yml.
 
     :param path: Path to the model file directory
-    :param format: The file format of the models. Supported formats are sbml, json, mat and yaml/yml
+    :param file_format: The file format of the models. Supported formats are sbml, json, mat and yaml/yml
     :return: A dictionary with model names as keys and metabolic models (COBRApy model objects) as values
     """
     endings = {"sbml": [".xml"], "json": [".json"], "mat": [".mat"], "yaml": [".yaml", ".yml"]}
     named_models = {}
     files = os.listdir(path)
-    expected_ending = endings[format]
+    expected_ending = endings[file_format]
     for file in files:
         if not os.path.isfile(os.path.join(path, file)) or str(os.path.splitext(file)[1]) not in expected_ending:
             continue
         else:
-            model, name = load_named_model(os.path.join(path, file), format=format)
+            model, name = load_named_model(os.path.join(path, file), file_format=file_format)
             named_models[name] = model
     return named_models
 
@@ -241,7 +240,9 @@ def make_model_ids_sbml_conform(model):
         if not group.name:
             group.name = group.id
         if group.id:
-            group.id = make_string_sbml_id_compatible(group.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+            group.id = make_string_sbml_id_compatible(group.id,
+                                                      remove_ascii_escapes=True,
+                                                      remove_trailing_underscore=True)
 
     rename_dict = {}
     for gene in model.genes:

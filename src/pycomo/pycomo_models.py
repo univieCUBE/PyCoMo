@@ -6,17 +6,11 @@ community model can be used for simulation, transferred via the sbml format, set
 flux vector tables."""
 
 # IMPORT SECTION
-import cobra
-import numpy as np
-import pandas as pd
-import libsbml
-import os
-from math import inf
-from optlang.symbolics import Zero
-from typing import List
+from typing import List, Union
 from .helper.utils import *
 from .helper.cli import *
 from .helper.multiprocess import *
+import libsbml
 import warnings
 import logging
 
@@ -920,7 +914,7 @@ class CommunityModel:
         :return: The name of the community member the reaction belongs to
         """
         if isinstance(reaction, str):
-            metabolite = self.model.reactions.get_by_id(reaction)
+            reaction = self.model.reactions.get_by_id(reaction)
 
         member_name = None
 
@@ -1144,7 +1138,7 @@ class CommunityModel:
         fraction_reaction.add_metabolites(fraction_reaction_mets)
         return constrained_mets
 
-    def change_reaction_bounds(self, reaction: str or cobra.Reaction, lower_bound, upper_bound):
+    def change_reaction_bounds(self, reaction: Union[str, cobra.Reaction], lower_bound, upper_bound):
         """
         This function allows changing reaction bounds in the community metabolic models. It takes care of adjusting the
         dummy metabolite stoichiometry.
@@ -1586,7 +1580,13 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def loopless_fva(self, reaction_ids, fraction_of_optimum=None, use_loop_reactions_for_ko=True, ko_candidate_ids=None, verbose=False, processes=None):
+    def loopless_fva(self,
+                     reaction_ids,
+                     fraction_of_optimum=None,
+                     use_loop_reactions_for_ko=True,
+                     ko_candidate_ids=None,
+                     verbose=False,
+                     processes=None):
         return loopless_fva(self,
                             reaction_ids,
                             fraction_of_optimum=fraction_of_optimum,
@@ -1611,6 +1611,7 @@ class CommunityModel:
         :param reactions: A list of reactions that should be analysed. This parameter is overwritten if
             only_exchange_reactions is set to True
         :param verbose: Print progress of loopless FVA
+        :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
         model = self.model
@@ -1622,25 +1623,26 @@ class CommunityModel:
             fraction_of_optimum = 1.
 
         if only_exchange_reactions:
-            if verbose: logger.info(f"Setting reactions to be analysed to exchange reactions only")
+            if verbose:
+                logger.info(f"Setting reactions to be analysed to exchange reactions only")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
-            if verbose: logger.info(f"Setting reactions to be analysed to all non-fraction-reactions")
+            if verbose:
+                logger.info(f"Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
         if fva_mu_c is not None:
+            f_bio_mets = {}
             if self.fixed_growth_rate_flag:
                 mu_c = self.mu_c
                 self.apply_fixed_growth_rate(fva_mu_c)
                 if composition_agnostic:
                     # Allow flux through the biomass reaction
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
-
                     # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
-                    # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
-                    # discover a superset of possible metabolite exchanges.
-                    f_bio_mets = {}
+                    # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows
+                    # to discover a superset of possible metabolite exchanges.
                     for member_name in self.get_member_names():
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
@@ -1648,19 +1650,21 @@ class CommunityModel:
                         biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 if loopless:
-                    if verbose: logger.info(f"Running loopless FVA")
+                    if verbose:
+                        logger.info(f"Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
                                                     use_loop_reactions_for_ko=True,
                                                     verbose=verbose,
                                                     processes=processes)
                 else:
-                    if verbose: logger.info(f"Running FVA")
+                    if verbose:
+                        logger.info(f"Running FVA")
                     solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                reactions,
-                                                                                fraction_of_optimum=fraction_of_optimum,
-                                                                                loopless=False,
-                                                                                processes=processes)
+                                                                                            reactions,
+                                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                                            loopless=False,
+                                                                                            processes=processes)
 
                 # Revert changes
                 if composition_agnostic:
@@ -1678,9 +1682,8 @@ class CommunityModel:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
 
                     # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
-                    # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows to
-                    # discover a superset of possible metabolite exchanges.
-                    f_bio_mets = {}
+                    # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows
+                    # to discover a superset of possible metabolite exchanges.
                     for member_name in self.get_member_names():
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
@@ -1688,19 +1691,21 @@ class CommunityModel:
                         biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 if loopless:
-                    if verbose: logger.info(f"Running loopless FVA")
+                    if verbose:
+                        logger.info(f"Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
-                                               fraction_of_optimum=fraction_of_optimum,
-                                               use_loop_reactions_for_ko=True,
-                                               verbose=verbose,
-                                               processes=processes)
+                                                    fraction_of_optimum=fraction_of_optimum,
+                                                    use_loop_reactions_for_ko=True,
+                                                    verbose=verbose,
+                                                    processes=processes)
                 else:
-                    if verbose: logger.info(f"Running FVA")
+                    if verbose:
+                        logger.info(f"Running FVA")
                     solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                reactions,
-                                                                                fraction_of_optimum=fraction_of_optimum,
-                                                                                loopless=False,
-                                                                                processes=processes)
+                                                                                            reactions,
+                                                                                            fraction_of_optimum=fraction_of_optimum,
+                                                                                            loopless=False,
+                                                                                            processes=processes)
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1711,20 +1716,22 @@ class CommunityModel:
                 self.convert_to_fixed_abundance()
         else:
             if loopless:
-                if verbose: logger.info(f"Running loopless FVA")
+                if verbose:
+                    logger.info(f"Running loopless FVA")
                 solution_df = self.loopless_fva(reactions,
-                                           fraction_of_optimum=fraction_of_optimum,
-                                           use_loop_reactions_for_ko=True,
-                                           verbose=verbose,
-                                           processes=processes)
+                                                fraction_of_optimum=fraction_of_optimum,
+                                                use_loop_reactions_for_ko=True,
+                                                verbose=verbose,
+                                                processes=processes)
             else:
-                if verbose: logger.info(f"Running FVA")
+                if verbose:
+                    logger.info(f"Running FVA")
                 solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                     reactions,
-                                                                     fraction_of_optimum=fraction_of_optimum,
-                                                                     loopless=False,
-                                                                     processes=processes)
-        
+                                                                                        reactions,
+                                                                                        fraction_of_optimum=fraction_of_optimum,
+                                                                                        loopless=False,
+                                                                                        processes=processes)
+
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
         return solution_df
@@ -2042,7 +2049,8 @@ class CommunityModel:
         Computes the overall maximum growth rate of the community.
 
         :param minimal_abundance: float indicating the minimal abundance of each member in the community
-        :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at the maximum growth rate
+        :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at
+        the maximum growth rate
         :param sensitivity: How many decimal places should be calculated
         Returns: maximum growth rate
         """
@@ -2050,7 +2058,7 @@ class CommunityModel:
         names = self.get_member_names()
         frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
         # check that the sum of minimal abundances is not greater than 1
-        assert len(names)*minimal_abundance <= 1.0, "sum of abundances is greater than 1"
+        assert len(names) * minimal_abundance <= 1.0, "sum of abundances is greater than 1"
         for frxn in frxns:
             frxn.bounds = (minimal_abundance, 1.0)
 
@@ -2062,7 +2070,7 @@ class CommunityModel:
         result = 0.
         x_is_fba_result = False
 
-        while result_difference > 10.**(-sensitivity):
+        while result_difference > 10. ** (-sensitivity):
             print("New round")
             print(f"lb: {lb}, ub: {ub}, x: {x}")
             # calculate and set mu
@@ -2091,21 +2099,21 @@ class CommunityModel:
                 print(df)
                 print(f"lb_df: {lb_df}")
                 # dataframe with range of possible abundances
-                R_df = ub_df - lb_df
-                print(f"R_df: {R_df}")
+                r_df = ub_df - lb_df
+                print(f"R_df: {r_df}")
                 # assert that all upper bounds are bigger than the set minimal abundance
                 assert (ub_df >= minimal_abundance).all()
                 # assert that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
-                assert (R_df >= 0.).all()
+                assert (r_df >= 0.).all()
                 # assert that the solution is not erroneous in the sense that the abundances sum up to 1.
                 assert sum(ub_df) >= 1. >= sum(lb_df)
                 # The total flexibility for different abundances
-                Delta = 1.-sum(lb_df)
-                print(f"Delta: {Delta}")
+                delta = 1. - sum(lb_df)
+                print(f"Delta: {delta}")
                 # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
-                if Delta > 0.:
-                    print(f"Sum R_df: {sum(R_df)}")
-                    delta_df = Delta * R_df / sum(R_df)
+                if delta > 0.:
+                    print(f"Sum R_df: {sum(r_df)}")
+                    delta_df = delta * r_df / sum(r_df)
                     ab_df = lb_df + delta_df
                 else:
                     ab_df = lb_df
@@ -2123,11 +2131,11 @@ class CommunityModel:
                 # check if fba result >= x
                 if fba_result >= x:
                     # fba result becomes the new x
-                    x = fba_result + 2 * 10**-sensitivity
+                    x = fba_result + 2 * 10 ** -sensitivity
                     x_is_fba_result = True
                     # adjust remaining parameters
                     lb = fba_result
-                    result_difference = fba_result-result
+                    result_difference = fba_result - result
                     result = fba_result
                 else:
                     # adjust upper bound
@@ -2140,14 +2148,14 @@ class CommunityModel:
 
             # update x
             if not x_is_fba_result:
-                x = (ub+lb)/2
+                x = (ub + lb) / 2
             x_is_fba_result = False
 
-            if ub-lb < 10**(-sensitivity):
+            if ub - lb < 10 ** (-sensitivity):
                 result_difference = 0.
 
         # truncate result
-        result = np.floor((result*10**sensitivity))/10**sensitivity
+        result = np.floor((result * 10 ** sensitivity)) / 10 ** sensitivity
         if self.fixed_abundance_flag:
             self.convert_to_fixed_growth_rate()
         # set result as growth rate

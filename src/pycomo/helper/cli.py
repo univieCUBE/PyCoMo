@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 
-__description__ = ('A package for generating community metabolic models from single species/strain models.')
+__description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
 __version__ = "0.2.0"
