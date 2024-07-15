@@ -168,7 +168,8 @@ class SingleOrganismModel:
         """
         old_compartments = model.compartments
         for comp in rename.keys():
-            assert comp in old_compartments
+            if comp not in old_compartments:
+                raise KeyError(f"Compartment {comp} not in model compartments")
 
         for met in model.metabolites:
             if met.compartment in rename.keys():
@@ -793,11 +794,10 @@ class CommunityModel:
             flux of the respective metabolite as value.
         """
         # Check that dataframe has the correct format
-        try:
-            assert all([isinstance(key, str) for key in medium_dict.keys()])
-            assert all([isinstance(value, float) for value in medium_dict.values()])
-        except AssertionError:
-            raise AssertionError
+        if not all([isinstance(key, str) for key in medium_dict.keys()]):
+            raise TypeError("Medium keys must be strings!")
+        if not all([isinstance(value, float) for value in medium_dict.values()]):
+            raise TypeError("Medium values must be floats!")
         self._medium = medium_dict
 
     def summary(self, suppress_f_metabolites=True):
@@ -1362,18 +1362,14 @@ class CommunityModel:
             return
 
         # Check if organism names are in the model
-        try:
-            assert all([name in self.get_member_names() for name in abd_dict.keys()])
-        except AssertionError:
-            print(f"Error: Some names in the abundances are not part of the model.")
-            print(f"\tAbundances: {abd_dict.keys()}")
-            print(f"\tOrganisms in model: {self.get_member_names()}")
-            raise AssertionError
+        if not all([name in self.get_member_names() for name in abd_dict.keys()]):
+            err_msg = f"Error: Some names in the abundances are not part of the model." \
+                      f"\n\tAbundances: {abd_dict.keys()}" \
+                      f"\n\tOrganisms in model: {self.get_member_names()}"
+            raise ValueError(err_msg)
 
         # Check that abundances sum to 1
-        try:
-            assert np.isclose([sum(abd_dict.values())], [1.])
-        except AssertionError:
+        if not np.isclose([sum(abd_dict.values())], [1.]):
             print(f"Warning: Abundances do not sum up to 1. Correction will be applied")
             if sum(abd_dict.values()) == 0.:
                 print(f"Error: The sum of abundances is 0")
@@ -1382,8 +1378,10 @@ class CommunityModel:
             for name, abundance in abd_dict.items():
                 abd_dict[name] = abundance * correction_factor
             print(f"Correction applied. New abundances are:\n{abd_dict}")
-            assert np.isclose([sum(abd_dict.values())], [1.])
-            assert not np.isnan(abd_dict.values()).any()
+            if not np.isclose([sum(abd_dict.values())], [1.]):
+                raise ValueError(f"Abundances do not sum up to 1: {abd_dict}")
+            if np.isnan(abd_dict.values()).any():
+                raise ValueError(f"Abundances contain NaN values: {abd_dict}")
 
         # Extend abundances to include all organisms of model
         for name in self.get_member_names():
@@ -1783,8 +1781,10 @@ class CommunityModel:
                 if "_TP_" not in rxn.id:
                     continue
                 rxn_member = rxn.id.split("_TP_")[0]
-                assert rxn_member in member_names
-                assert rxn.id in set(solution_df["reaction_id"])
+                if rxn_member not in member_names:
+                    raise ValueError(f"Community member extracted from reaction is not part of the model")
+                if rxn.id not in set(solution_df["reaction_id"]):
+                    raise ValueError(f"Reaction is not part of the solution dataframe")
                 flux = float(solution_df.loc[rxn.id, "flux"])
                 row_dict[rxn_member] = 0. if close_to_zero(flux) else flux
             rows.append(row_dict)
@@ -1829,8 +1829,10 @@ class CommunityModel:
                 if "_TP_" not in rxn.id:
                     continue
                 rxn_member = rxn.id.split("_TP_")[0]
-                assert rxn_member in member_names
-                assert rxn.id in set(solution_df["reaction_id"])
+                if rxn_member not in member_names:
+                    raise ValueError(f"Community member extracted from reaction is not part of the model")
+                if rxn.id not in set(solution_df["reaction_id"]):
+                    raise ValueError(f"Reaction is not part of the solution dataframe")
                 min_flux = float(solution_df.loc[rxn.id, "min_flux"])
                 max_flux = float(solution_df.loc[rxn.id, "max_flux"])
                 row_dict[rxn_member + "_min_flux"] = 0. if close_to_zero(min_flux) else min_flux
@@ -2026,10 +2028,14 @@ class CommunityModel:
         :return: The community metabolic model as CommunityModel object
         """
         abundance_parameters = get_abundance_parameters_from_sbml_file(file_path)
-        assert len(abundance_parameters) > 0
+        if not (len(abundance_parameters) > 0):
+            raise ValueError(f"PyCoMo community model parameters could not be extracted from SBML file.\n"
+                             f"Make sure the SBML file is in a valid format for PyCoMo community metabolic models.")
 
         flags_and_muc = get_flags_and_muc_from_sbml_file(file_path)
-        assert len(flags_and_muc) == 4
+        if not (len(flags_and_muc) == 4):
+            raise ValueError(f"PyCoMo community model parameters could not be extracted from SBML file.\n"
+                             f"Make sure the SBML file is in a valid format for PyCoMo community metabolic models.")
 
         constructor_args = {}
         constructor_args["member_names"] = list(abundance_parameters.keys())
@@ -2057,7 +2063,8 @@ class CommunityModel:
         names = self.get_member_names()
         frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
         # check that the sum of minimal abundances is not greater than 1
-        assert len(names) * minimal_abundance <= 1.0, "sum of abundances is greater than 1"
+        if len(names) * minimal_abundance > 1.0:
+            raise ValueError("sum of abundances is greater than 1")
         for frxn in frxns:
             frxn.bounds = (minimal_abundance, 1.0)
 
@@ -2100,12 +2107,15 @@ class CommunityModel:
                 # dataframe with range of possible abundances
                 r_df = ub_df - lb_df
                 print(f"R_df: {r_df}")
-                # assert that all upper bounds are bigger than the set minimal abundance
-                assert (ub_df >= minimal_abundance).all()
-                # assert that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
-                assert (r_df >= 0.).all()
-                # assert that the solution is not erroneous in the sense that the abundances sum up to 1.
-                assert sum(ub_df) >= 1. >= sum(lb_df)
+                # check that all upper bounds are bigger than the set minimal abundance
+                if not (ub_df >= minimal_abundance).all():
+                    raise ValueError("Not all upper bounds are bigger than the set minimal abundance")
+                # check that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
+                if not (r_df >= 0.).all():
+                    raise ValueError("Some possible ranges are less than 0.")
+                # check that the solution is not erroneous in the sense that the abundances sum up to 1.
+                if not (sum(ub_df) >= 1. >= sum(lb_df)):
+                    raise ValueError("Upper and lower bounds do not allow abundances to sum up to 1")
                 # The total flexibility for different abundances
                 delta = 1. - sum(lb_df)
                 print(f"Delta: {delta}")

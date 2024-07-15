@@ -101,7 +101,8 @@ def read_abundance_from_file(file):
     endings = {"sbml", "json", "mat", "yaml", "yml"}
     abd_df = pd.read_csv(file, sep=",")
     abd_dict = {}
-    assert len(abd_df.columns) == 2
+    if len(abd_df.columns) != 2:
+        raise ValueError("Abundance file must contain exactly 2 columns")
     abd_df.columns = ["model", "fraction"]
     for idx, row in abd_df.iterrows():
         model = row["model"]

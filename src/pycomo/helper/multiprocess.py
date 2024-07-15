@@ -200,13 +200,11 @@ def loopless_fva(pycomo_model,
 
         if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
             if verbose:
-                logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum*100}%")
-            try:
-                fraction_of_optimum = float(fraction_of_optimum)
-                assert 0. <= fraction_of_optimum <= 1.
-            except AssertionError:
-                print(f"Error: fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
-                      f"Continuing with fraction_of_optimum=1")
+                logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
+            fraction_of_optimum = float(fraction_of_optimum)
+            if not (0. <= fraction_of_optimum <= 1.):
+                logger.warning(f"fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
+                               f"Continuing with fraction_of_optimum=1")
                 fraction_of_optimum = 1.0
 
             objective_value = pycomo_model.model.slim_optimize()
