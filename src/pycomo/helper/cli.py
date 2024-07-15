@@ -128,15 +128,15 @@ def check_args(args):
 
     args.fva_solution_path = None
     if args.fva_flux is not None:
-        args.fva_solution_path = os.path.join(args.output_dir, f"{args.name}_fva_{args.fva_flux}_flux.csv")
+        args.fva_solution_path = os.path.join(args.output_dir, f"{args.name}_fva_flux.csv")
 
     args.fba_interaction_path = None
     if args.fba_interaction:
-        args.fba_interaction_path = os.path.join(args.output_dir, f"{args.name}_fba_flux.csv")
+        args.fba_interaction_path = os.path.join(args.output_dir, f"{args.name}_fba_interaction_flux.csv")
 
     args.fva_interaction_path = None
     if args.fva_interaction:
-        args.fva_interaction_path = os.path.join(args.output_dir, f"{args.name}_fva_{args.fva_interaction}_flux.csv")
+        args.fva_interaction_path = os.path.join(args.output_dir, f"{args.name}_fva_interaction_flux.csv")
 
     args.sbml_output_path = os.path.join(args.output_dir, f"{args.name}.xml")
 
