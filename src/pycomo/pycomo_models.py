@@ -10,6 +10,7 @@ from typing import List, Union
 from .helper.utils import *
 from .helper.cli import *
 from .helper.multiprocess import *
+from math import isnan
 import libsbml
 import warnings
 import logging
@@ -371,7 +372,7 @@ class SingleOrganismModel:
                     if isinstance(annotation_id, list) and len(annotation_id) == 1:
                         annotation_id = annotation_id[0]
                     elif not isinstance(annotation_id, str):
-                        raise AssertionError(
+                        raise TypeError(
                             f"Annotation for merging contains multiple IDs! Cannot merge {annotation_id}")
                     new_met.id = make_string_sbml_id_compatible(annotation_id + "_" + new_comp,
                                                                 remove_ascii_escapes=True)
@@ -646,12 +647,12 @@ class CommunityModel:
         elif "member_names" in kwargs.keys():  # Construction from saved file
             model_names = kwargs["member_names"]
         else:
-            raise AssertionError("No models provided to CommunityModel object!")
+            raise ValueError("No models provided to CommunityModel object!")
 
         if not list_contains_unique_strings(model_names):
-            raise AssertionError(f"Model names contain duplicates!")
+            raise ValueError(f"Model names contain duplicates!")
         if list_of_strings_is_self_contained(model_names):
-            raise AssertionError(f"Some model names are contained in others!")
+            raise ValueError(f"Some model names are contained in others!")
 
         self._member_names = model_names
 
@@ -775,11 +776,11 @@ class CommunityModel:
         """
         Getter function for the medium of the community metabolic model.
 
-        :raises AssertionError: If no medium has been set so far, this error is raised
+        :raises ValueError: If no medium has been set so far, this error is raised
         :return: A dictionary of reaction IDs as keys and their maximum influx as values
         """
         if self._medium is None:
-            raise AssertionError("Error: No medium set for this community model.\nPlease set the medium with "
+            raise ValueError("Error: No medium set for this community model.\nPlease set the medium with "
                                  ".load_medium_from_file('/path/to/medium_file.csv')")
         return self._medium
 
@@ -788,7 +789,7 @@ class CommunityModel:
         """
         Setter function for the medium of the community metabolic model.
 
-        :raises AssertionError: If not all keys of the medium dictionary are strings, or not all values are floats,
+        :raises ValueError: If not all keys of the medium dictionary are strings, or not all values are floats,
             this error is raised.
         :param medium_dict: The medium dictionary with exchange reaction IDs as keys and the maximum
             flux of the respective metabolite as value.
@@ -890,7 +891,7 @@ class CommunityModel:
         """
         try:
             original_medium = self.medium
-        except AssertionError:
+        except ValueError:
             original_medium = self.model.medium
         no_medium = {}
         self.model.medium = no_medium
@@ -2115,7 +2116,7 @@ class CommunityModel:
                     raise ValueError("Some possible ranges are less than 0.")
                 # check that the solution is not erroneous in the sense that the abundances sum up to 1.
                 if not (sum(ub_df) >= 1. >= sum(lb_df)):
-                    raise ValueError("Upper and lower bounds do not allow abundances to sum up to 1")
+                    raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
                 delta = 1. - sum(lb_df)
                 print(f"Delta: {delta}")
@@ -2135,6 +2136,8 @@ class CommunityModel:
 
                 # conduct fba with this composition
                 fba_result = self.model.slim_optimize()
+                if isnan(fba_result):
+                    raise cobra.exceptions.Infeasible("FBA result is NaN!")
                 print(f"fba results: {fba_result}")
 
                 # check if fba result >= x
@@ -2150,7 +2153,7 @@ class CommunityModel:
                     # adjust upper bound
                     ub = fba_result
 
-            except (AssertionError, cobra.exceptions.Infeasible):
+            except (ValueError, cobra.exceptions.Infeasible):
                 # adjust parameters in case of infeasible fva solution
                 print(f"Infeasible!")
                 ub = x
