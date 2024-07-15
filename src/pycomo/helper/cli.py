@@ -76,6 +76,10 @@ def create_arg_parser():
                                 "whether they are cross-fed in a file. Set the threshold of the objective that needs "
                                 "to be achieved.")
 
+    pg_output.add_argument('--composition-agnostic', action='store_true', default=False,
+                           help="run FVA with relaxed constraints, to calculate all possible cross-feeding "
+                                "interactions across all community growth-rates and abundance profiles.")
+
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)

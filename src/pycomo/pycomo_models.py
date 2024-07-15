@@ -1729,17 +1729,23 @@ class CommunityModel:
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
         return solution_df
 
-    def fva_solution_flux_vector(self, file_path="", fraction_of_optimum=0.9, processes=None):
+    def fva_solution_flux_vector(self, file_path="",
+                                 fraction_of_optimum=0.9,
+                                 composition_agnostic=False,
+                                 processes=None):
         """
         Run flux variability analysis on the current configuration of the community metabolic model and save the
         resulting flux ranges to a csv file.
 
         :param file_path: The fraction of the optimal objective flux that needs to be reached
         :param fraction_of_optimum: Path of the output file
+        :param composition_agnostic: Run FVA with relaxed constraints (composition agnostic)
         :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
-        solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum, processes=processes)
+        solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum,
+                                   processes=processes,
+                                   composition_agnostic=composition_agnostic)
 
         if len(file_path) > 0:
             print(f"Saving flux vector to {file_path}")
@@ -2160,7 +2166,7 @@ class CommunityModel:
 def doall(model_folder="", models=None, com_model=None, out_dir="", community_name="community_model",
           fixed_growth_rate=None, abundance="equal", medium=None,
           fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
-          fva_interaction_path=None, sbml_output_file=None, return_as_cobra_model=False,
+          fva_interaction_path=None, composition_agnostic=False, sbml_output_file=None, return_as_cobra_model=False,
           merge_via_annotation=None, num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
@@ -2182,6 +2188,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     :param fva_solution_threshold: The fraction of the objective optimum needed to be reached in FVA
     :param fba_interaction_path: Run FBA to calculate cross-feeding interactions and save the solution to this file
     :param fva_interaction_path: Run FVA to calculate cross-feeding interactions and save the solution to this file
+    :param composition_agnostic: Run FVA with relaxed constraints (composition agnostic)
     :param sbml_output_file: If a filename is given, save the community metabolic model as SBML file
     :param return_as_cobra_model: If true, returns the community metabolic model as COBRApy model object, otherwise as
         PyCoMo CommunityModel object
@@ -2262,14 +2269,15 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         try:
             com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_path),
                                                    fraction_of_optimum=fva_solution_threshold,
-                                                   processes=num_cores)
+                                                   processes=num_cores,
+                                                   composition_agnostic=composition_agnostic)
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
 
     if fva_interaction_path is not None:
         try:
             interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False,
-                                                                          composition_agnostic=True,
+                                                                          composition_agnostic=composition_agnostic,
                                                                           processes=num_cores)
             print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
@@ -2313,7 +2321,8 @@ def main():
               fva_interaction_path=args.fva_interaction_path,
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
-              num_cores=args.num_cores)
+              num_cores=args.num_cores,
+              composition_agnostic=args.composition_agnostic)
 
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
         doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
@@ -2323,7 +2332,8 @@ def main():
               fva_interaction_path=args.fva_interaction_path,
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
-              num_cores=args.num_cores)
+              num_cores=args.num_cores,
+              composition_agnostic=args.composition_agnostic)
     else:
         doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
               medium=args.medium,
@@ -2332,7 +2342,8 @@ def main():
               fva_interaction_path=args.fva_interaction_path,
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
-              num_cores=args.num_cores)
+              num_cores=args.num_cores,
+              composition_agnostic=args.composition_agnostic)
 
     print("All done!")
     sys.exit(0)
