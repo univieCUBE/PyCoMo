@@ -523,6 +523,35 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
     return metabolites_without_overlap
 
 
+def check_mass_balance_fomula_safe(model):
+    """
+    Checks a model's reactions for mass and charge balance. In case the mass / charge balance check fails due to
+    wrongly formatted metabolite formulae, add reaction and metabolites to unbalanced reactions and throw a warning.
+
+    :param model: The model to check
+    :return: Dictionary of key reaction and value: dictionary (metabolite: float)
+    """
+    _NOT_MASS_BALANCED_TERMS = {
+        "SBO:0000627",  # EXCHANGE
+        "SBO:0000628",  # DEMAND
+        "SBO:0000629",  # BIOMASS
+        "SBO:0000631",  # PSEUDOREACTION
+        "SBO:0000632",  # SINK
+    }
+
+    unbalanced = {}
+    for reaction in model.reactions:
+        if reaction.annotation.get("sbo") not in _NOT_MASS_BALANCED_TERMS:
+            try:
+                balance = reaction.check_mass_balance()
+                if balance:
+                    unbalanced[reaction] = balance
+            except ValueError:
+                print(f"Warning: not wrongly formatted metabolite formula in metabolites of reaction {reaction.id}")
+                unbalanced[reaction] = reaction.metabolites
+    return unbalanced
+
+
 def get_f_reactions(model):
     """
     Get the IDs of all fraction reactionsm in a PyCoMo community metabolic model.

@@ -860,15 +860,14 @@ class CommunityModel:
         :return: A list of unbalanced reactions
         """
         try:
-            unbalanced_reactions = cobra.manipulation.validate.check_mass_balance(self.model)
+            unbalanced_reactions = check_mass_balance_fomula_safe(self.model)
         except TypeError:
             # This TypeError can come from multiple sbo terms being present in reaction annotations
             with self.model.copy() as single_reaction_sbo_model:
                 for rxn in single_reaction_sbo_model.reactions:
                     if isinstance(rxn.annotation.get("sbo"), list):
                         rxn.annotation["sbo"] = rxn.annotation.get("sbo")[0]
-                unbalanced_reactions = cobra.manipulation.validate.check_mass_balance(single_reaction_sbo_model)
-
+                unbalanced_reactions = check_mass_balance_fomula_safe(single_reaction_sbo_model)
         return unbalanced_reactions
 
     def is_mass_balanced(self):
