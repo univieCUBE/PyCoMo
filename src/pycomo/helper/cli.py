@@ -83,6 +83,9 @@ def create_arg_parser():
                            help="run FVA with relaxed constraints, to calculate all possible cross-feeding "
                                 "interactions across all community growth-rates and abundance profiles.")
 
+    pg_output.add_argument('--loopless', type=bool, default=True,
+                           help="run FVA with loop correction (on by default)")
+
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
