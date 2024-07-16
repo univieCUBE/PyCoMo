@@ -11,7 +11,7 @@ pip install pycomo
 ```
 Or via conda:
 ```
-conda install -c bioconda pycomo
+conda install -c conda-forge -c bioconda pycomo
 ```
 Alternatively PyCoMo can be installed from the GitHub repository. First clone the repository to your machine.
 ```
