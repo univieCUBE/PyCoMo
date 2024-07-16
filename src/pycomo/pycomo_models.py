@@ -1737,6 +1737,7 @@ class CommunityModel:
     def fva_solution_flux_vector(self, file_path="",
                                  fraction_of_optimum=0.9,
                                  composition_agnostic=False,
+                                 loopless=True,
                                  processes=None):
         """
         Run flux variability analysis on the current configuration of the community metabolic model and save the
@@ -1745,12 +1746,14 @@ class CommunityModel:
         :param file_path: The fraction of the optimal objective flux that needs to be reached
         :param fraction_of_optimum: Path of the output file
         :param composition_agnostic: Run FVA with relaxed constraints (composition agnostic)
+        :param loopless: Run loopless FVA
         :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
         solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum,
                                    processes=processes,
-                                   composition_agnostic=composition_agnostic)
+                                   composition_agnostic=composition_agnostic,
+                                   loopless=loopless)
 
         if len(file_path) > 0:
             print(f"Saving flux vector to {file_path}")
@@ -1798,7 +1801,7 @@ class CommunityModel:
         return exchg_metabolite_df
 
     def cross_feeding_metabolites_from_fva(self, fraction_of_optimum=0.,
-                                           composition_agnostic=False, fva_mu_c=None, processes=None):
+                                           composition_agnostic=False, fva_mu_c=None, loopless=True, processes=None):
         """
         Run flux variability analysis and convert the solution flux ranges into a table of metabolites, including the
         solution flux ranges for the exchange reaction of each metabolite for every community member.
@@ -1807,6 +1810,7 @@ class CommunityModel:
         :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
             solutions without balanced growth, i.e. different growth rate of community members.
         :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
+        :param loopless: Run loopless FVA
         :param processes: The number of processes to use
         :return: A dataframe of the solution flux range for the exchange reaction of each metabolite for every community
             member
@@ -1815,7 +1819,9 @@ class CommunityModel:
 
         solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum,
                                    composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c,
-                                   only_exchange_reactions=True, processes=processes)
+                                   only_exchange_reactions=True,
+                                   loopless=loopless,
+                                   processes=processes)
         rows = []
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
@@ -1881,7 +1887,12 @@ class CommunityModel:
 
         return exchg_metabolite_df
 
-    def potential_metabolite_exchanges(self, fba=False, composition_agnostic=True, fva_mu_c=None, processes=None):
+    def potential_metabolite_exchanges(self,
+                                       fba=False,
+                                       composition_agnostic=True,
+                                       fva_mu_c=None,
+                                       loopless=True,
+                                       processes=None):
         """
         Calculates all potentially exchanged metabolites between the community members. This can be done via flux
         balance analysis or flux variability analysis.
@@ -1890,6 +1901,7 @@ class CommunityModel:
         :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
             solutions without balanced growth, i.e. different growth rate of community members.
         :param fva_mu_c: Set a temporary community growth rate for the analysis (only FVA).
+        :param loopless: Run loopless FVA
         :param processes: The number of processes to use (only FVA)
         :return: A dataframe of which metabolites are cross-fed, taken up or secreted by each community member
         """
@@ -1899,10 +1911,12 @@ class CommunityModel:
         elif composition_agnostic:
             exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=None,
                                                                   composition_agnostic=True,
+                                                                  loopless=loopless,
                                                                   processes=processes)
         else:
             exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=fva_mu_c,
                                                                   composition_agnostic=False,
+                                                                  loopless=loopless,
                                                                   processes=processes)
 
         return self.format_exchg_rxns(exchange_df)
@@ -2187,7 +2201,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
           fixed_growth_rate=None, abundance="equal", medium=None,
           fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
           fva_interaction_path=None, composition_agnostic=False, sbml_output_file=None, return_as_cobra_model=False,
-          merge_via_annotation=None, num_cores=1):
+          merge_via_annotation=None, loopless=True, num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
     generation of community metabolic models, their analyses and can save the results of analyses as well as the model
@@ -2214,6 +2228,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         PyCoMo CommunityModel object
     :param merge_via_annotation: The database to be used for matching boundary metabolites when merging into a
         community metabolic model. If None, matching of metabolites is done via metabolite IDs instead
+    :param loopless: Run loopless FVA
     :param num_cores: The number of cores to use in flux variability analysis
     :return: The community metabolic model, either as COBRApy model object or PyCoMo CommunityModel object (see
         return_as_cobra_model parameter)
@@ -2290,7 +2305,8 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
             com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_path),
                                                    fraction_of_optimum=fva_solution_threshold,
                                                    processes=num_cores,
-                                                   composition_agnostic=composition_agnostic)
+                                                   composition_agnostic=composition_agnostic,
+                                                   loopless=loopless)
         except cobra.exceptions.Infeasible:
             print(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
 
@@ -2298,6 +2314,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         try:
             interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False,
                                                                           composition_agnostic=composition_agnostic,
+                                                                          loopless=loopless,
                                                                           processes=num_cores)
             print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
@@ -2342,7 +2359,8 @@ def main():
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
-              composition_agnostic=args.composition_agnostic)
+              composition_agnostic=args.composition_agnostic,
+              loopless=args.loopless)
 
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
         doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
@@ -2353,7 +2371,8 @@ def main():
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
-              composition_agnostic=args.composition_agnostic)
+              composition_agnostic=args.composition_agnostic,
+              loopless=args.loopless)
     else:
         doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
               medium=args.medium,
@@ -2363,7 +2382,8 @@ def main():
               sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
-              composition_agnostic=args.composition_agnostic)
+              composition_agnostic=args.composition_agnostic,
+              loopless=args.loopless)
 
     print("All done!")
     sys.exit(0)

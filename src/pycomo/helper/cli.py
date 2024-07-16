@@ -5,7 +5,7 @@ import argparse
 __description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 
 def create_arg_parser():
@@ -82,6 +82,9 @@ def create_arg_parser():
     pg_output.add_argument('--composition-agnostic', action='store_true', default=False,
                            help="run FVA with relaxed constraints, to calculate all possible cross-feeding "
                                 "interactions across all community growth-rates and abundance profiles.")
+
+    pg_output.add_argument('--loopless', type=bool, default=True,
+                           help="run FVA with loop correction (on by default)")
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
