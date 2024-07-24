@@ -633,7 +633,7 @@ def find_loops_in_model(model, processes=None):
                 if min_flux != 0. or max_flux != 0.:
                     loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
     else:
-        _init_loop_worker(tuple([loop_model]))
+        _init_loop_worker(loop_model)
         for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
             if min_flux != 0. or max_flux != 0.:
                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
