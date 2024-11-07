@@ -69,7 +69,7 @@ class SingleOrganismModel:
         self._original_name = name
         self.name = make_string_sbml_id_compatible(name, remove_ascii_escapes=True)
         if name != self.name:
-            print(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
+            logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         self.biomass_met_id = biomass_met_id
         self._name_via_annotation = name_via_annotation
         self.shared_compartment_name = shared_compartment_name
@@ -658,13 +658,13 @@ class CommunityModel:
         if max_flux > 0.:
             self.max_flux = max_flux
         else:
-            print(f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
+            logger.warning(f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
                   f"instead.")
             self.max_flux = 1000.
 
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
-            print(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
+            logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         if merge_via_annotation is not None:
             self._merge_via_annotation = merge_via_annotation
             for model in self.member_models:
@@ -710,9 +710,9 @@ class CommunityModel:
         :return: The community metabolic model (COBRApy model object)
         """
         if self._model is None:
-            print(f"No community model generated yet. Generating now:")
+            logger.info(f"No community model generated yet. Generating now:")
             self.generate_community_model()
-            print(f"Generated community model.")
+            logger.info(f"Generated community model.")
             self.fixed_abundance_flag = False
             self.medium_flag = False
         return self._model
@@ -835,7 +835,7 @@ class CommunityModel:
                 old_name, new_name = member.get_name_conversion()
                 conversion_dict[old_name] = new_name
         else:
-            print("Warning: There are no member models in the community model object.")
+            logger.warning("Warning: There are no member models in the community model object.")
             for member_name in self.get_member_names():
                 conversion_dict[member_name] = member_name
         return conversion_dict
@@ -999,13 +999,13 @@ class CommunityModel:
                                                                                              merged_model)
                 for met_id in unbalanced_metabolites:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    print(f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
+                    logger.warning(f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
                           f"Please manually curate this metabolite for a mass and charge balanced model!")
                 no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
                                                                                                   merged_model)
                 for met_id in no_annotation_overlap:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    print(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
+                    logger.warning(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
                           f"Please make sure that the metabolite with this ID is indeed representing the same substance"
                           f" in all models!")
 
@@ -1053,7 +1053,7 @@ class CommunityModel:
         self._model = merged_model
 
         if not self.is_mass_balanced():
-            print(
+            logger.warning(
                 "WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are "
                 "imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
 
@@ -1265,7 +1265,7 @@ class CommunityModel:
         :return: The updated model
         """
         if not self.fixed_growth_rate_flag:
-            print("Error: The model needs to be in fixed growth rate structure to set a fixed growth rate.")
+            logger.error("Error: The model needs to be in fixed growth rate structure to set a fixed growth rate.")
             return
         self.mu_c = flux
 
@@ -1313,7 +1313,7 @@ class CommunityModel:
         unchanged if it is already in fixed abundance structure.
         """
         if self.fixed_abundance_flag:
-            print(f"Note: Model already has fixed abundance structure.")
+            logger.info(f"Note: Model already has fixed abundance structure.")
             return
 
         model = self.model
@@ -1357,7 +1357,7 @@ class CommunityModel:
         (check fixed_abundance_flag).
         """
         if not self.fixed_abundance_flag:
-            print("Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
+            logger.error("Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
                   "Convert the model to fixed abundance structure first.")
             return
 
@@ -1370,15 +1370,15 @@ class CommunityModel:
 
         # Check that abundances sum to 1
         if not np.isclose([sum(abd_dict.values())], [1.]):
-            print(f"Warning: Abundances do not sum up to 1. Correction will be applied")
+            logger.warning(f"Warning: Abundances do not sum up to 1. Correction will be applied")
             if sum(abd_dict.values()) == 0.:
-                print(f"Error: The sum of abundances is 0")
+                logger.error(f"Error: The sum of abundances is 0")
                 raise ValueError
             correction_factor = 1 / sum(abd_dict.values())
             for name, abundance in abd_dict.items():
                 new_abundance = abundance * correction_factor
                 abd_dict[name] = new_abundance
-            print(f"Correction applied. New abundances are:\n{abd_dict}")
+            logger.info(f"Correction applied. New abundances are:\n{abd_dict}")
             if not np.isclose([sum(abd_dict.values())], [1.]):
                 raise ValueError(f"Abundances do not sum up to 1: {abd_dict}")
             if np.isnan(list(abd_dict.values())).any():
@@ -1416,7 +1416,7 @@ class CommunityModel:
         is left unchanged if it is already in fixed abundance structure.
         """
         if self.fixed_growth_rate_flag:
-            print(f"Note: Model already has fixed growth rate structure.")
+            logger.info(f"Note: Model already has fixed growth rate structure.")
             return
 
         model = self.model
@@ -1574,7 +1574,7 @@ class CommunityModel:
         solution_df = self.run_fba()
 
         if len(file_path) > 0:
-            print(f"Saving flux vector to {file_path}")
+            logger.info(f"Saving flux vector to {file_path}")
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
@@ -1756,7 +1756,7 @@ class CommunityModel:
                                    loopless=loopless)
 
         if len(file_path) > 0:
-            print(f"Saving flux vector to {file_path}")
+            logger.info(f"Saving flux vector to {file_path}")
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
@@ -1955,7 +1955,7 @@ class CommunityModel:
             reactions_in_loops = self.get_loops()
             num_loop_reactions = len(reactions_in_loops)
         else:
-            print(f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
+            logger.info(f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
                   f"would take some time. If needed, please run manually via .get_loops()")
         report_dict = {"community_name": self.name,
                        "model_structure": model_structure,
@@ -2092,8 +2092,8 @@ class CommunityModel:
         x_is_fba_result = False
 
         while result_difference > 10. ** (-sensitivity):
-            print("New round")
-            print(f"lb: {lb}, ub: {ub}, x: {x}")
+            logger.info("New round")
+            logger.info(f"lb: {lb}, ub: {ub}, x: {x}")
             # calculate and set mu
             if self.fixed_abundance_flag:
                 self.convert_to_fixed_growth_rate()
@@ -2117,11 +2117,11 @@ class CommunityModel:
                 # dataframes with min and max flux values of fraction reactions
                 lb_df = (df["min_flux"]).apply(lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance)
                 ub_df = (df["max_flux"])
-                print(df)
-                print(f"lb_df: {lb_df}")
+                logger.debug(df)
+                logger.debug(f"lb_df: {lb_df}")
                 # dataframe with range of possible abundances
                 r_df = ub_df - lb_df
-                print(f"R_df: {r_df}")
+                logger.debug(f"R_df: {r_df}")
                 # check that all upper bounds are bigger than the set minimal abundance
                 if not (ub_df >= minimal_abundance).all():
                     raise ValueError("Not all upper bounds are bigger than the set minimal abundance")
@@ -2133,15 +2133,15 @@ class CommunityModel:
                     raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
                 delta = 1. - sum(lb_df)
-                print(f"Delta: {delta}")
+                logger.debug(f"Delta: {delta}")
                 # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
                 if delta > 0.:
-                    print(f"Sum R_df: {sum(r_df)}")
+                    logger.debug(f"Sum R_df: {sum(r_df)}")
                     delta_df = delta * r_df / sum(r_df)
                     ab_df = lb_df + delta_df
                 else:
                     ab_df = lb_df
-                print(f"ab_df: {ab_df}")
+                logger.debug(f"ab_df: {ab_df}")
                 # create an abundance dictionary
                 abundance_dict = dict(zip(member_id, ab_df))
                 # set abundance
@@ -2152,7 +2152,7 @@ class CommunityModel:
                 fba_result = self.model.slim_optimize()
                 if isnan(fba_result):
                     raise cobra.exceptions.Infeasible("FBA result is NaN!")
-                print(f"fba results: {fba_result}")
+                logger.debug(f"fba results: {fba_result}")
 
                 # check if fba result >= x
                 if fba_result >= x:
@@ -2169,7 +2169,7 @@ class CommunityModel:
 
             except (ValueError, cobra.exceptions.Infeasible):
                 # adjust parameters in case of infeasible fva solution
-                print(f"Infeasible!")
+                logger.debug(f"Infeasible!")
                 ub = x
 
             # update x
@@ -2290,7 +2290,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
             com_model_obj.convert_to_fixed_abundance()
     else:
         if fixed_growth_rate < 0.:
-            print(f"Error: Specified growth rate is negative ({fixed_growth_rate}). PyCoMo will continue with a "
+            logger.error(f"Error: Specified growth rate is negative ({fixed_growth_rate}). PyCoMo will continue with a "
                   f"growth rate set to 0.")
             fixed_growth_rate = 0.
         com_model_obj.convert_to_fixed_growth_rate()
@@ -2308,7 +2308,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         try:
             com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_path))
         except cobra.exceptions.Infeasible:
-            print(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
+            logger.warning(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
 
     if fva_solution_path is not None:
         try:
@@ -2318,7 +2318,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
                                                    composition_agnostic=composition_agnostic,
                                                    loopless=loopless)
         except cobra.exceptions.Infeasible:
-            print(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
+            logger.warning(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
 
     if fva_interaction_path is not None:
         try:
@@ -2326,20 +2326,20 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
                                                                           composition_agnostic=composition_agnostic,
                                                                           loopless=loopless,
                                                                           processes=num_cores)
-            print(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
+            logger.info(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
-            print(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
+            logger.warning(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
 
     if fba_interaction_path is not None:
         try:
             interaction_df = com_model_obj.potential_metabolite_exchanges(fba=True)
-            print(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_path)}")
+            logger.info(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_path)}")
             interaction_df.to_csv(os.path.join(out_dir, fba_interaction_path), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
-            print(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
+            logger.warning(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
 
     if return_as_cobra_model:
         # Retrieve community model
@@ -2355,7 +2355,7 @@ def main():
     parser = create_arg_parser()
     args = parser.parse_args()
     args = check_args(args)
-    print(args)
+    logger.info(args)
     if args.abundance is not None and args.abundance != "equal":
         # Retrieve the abundance from file
         args.abundance = read_abundance_from_file(args.abundance)
@@ -2395,7 +2395,7 @@ def main():
               composition_agnostic=args.composition_agnostic,
               loopless=args.loopless)
 
-    print("All done!")
+    logger.info("All done!")
     sys.exit(0)
 
 

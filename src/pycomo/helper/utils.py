@@ -7,6 +7,16 @@ import os
 import re
 from cobra.util.process_pool import ProcessPool
 from cobra.core import Configuration
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.info('Utils Logger initialized.')
 
 configuration = Configuration()
 
@@ -63,7 +73,7 @@ def remove_dunder_from_ascii_escape(match_obj):
     :return: The match object with the outer underscore characters removed
     """
     if match_obj.group() is not None:
-        print(match_obj.group())
+        logger.debug(match_obj.group())
         return match_obj.group()[1:-1]
 
 
@@ -189,14 +199,14 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
         if expected_biomass_id in [met.id for met in biomass_products]:
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         elif expected_biomass_id in [met.id for met in model.metabolites]:
-            print(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
+            logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         else:
             raise AssertionError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
     elif len(biomass_products) == 0:
         # No metabolites produced
         if generate_if_none:
-            print(f"Note: no products in the objective function, adding biomass to it.")
+            logger.info(f"Note: no products in the objective function, adding biomass to it.")
             biomass_met = cobra.Metabolite(f"cpd11416_{shared_compartment_name}", name='Biomass',
                                            compartment=shared_compartment_name)
             model.add_metabolites([biomass_met])
@@ -208,7 +218,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
     else:
         # Multiple products in the objective, making biomass metabolites ambiguous
         if generate_if_none:
-            print(f"Note: no products in the objective function, adding biomass to it.")
+            logger.info(f"Note: no products in the objective function, adding biomass to it.")
             biomass_met = cobra.Metabolite(f"cpd11416_{shared_compartment_name}", name='Biomass',
                                            compartment=shared_compartment_name)
             model.add_metabolites([biomass_met])
@@ -338,7 +348,7 @@ def get_exchange_metabolites(model):
     exchange_metabolites = {}
     for reaction in model.exchanges:
         if len(reaction.metabolites) != 1:
-            print(f"Error: exchange reaction {reaction.id} has more than 1 metabolite")
+            logger.error(f"Error: exchange reaction {reaction.id} has more than 1 metabolite")
         exchange_met = list(reaction.metabolites.keys())[0]
         exchange_metabolites[exchange_met.id] = exchange_met
     return exchange_metabolites
@@ -548,7 +558,7 @@ def check_mass_balance_fomula_safe(model):
                 if balance:
                     unbalanced[reaction] = balance
             except ValueError:
-                print(f"Warning: not wrongly formatted metabolite formula in metabolites of reaction {reaction.id}")
+                logger.warning(f"Warning: not wrongly formatted metabolite formula in metabolites of reaction {reaction.id}")
                 unbalanced[reaction] = reaction.metabolites
     return unbalanced
 
