@@ -2272,7 +2272,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         elif isinstance(abundance, dict):
             name_conversion = com_model_obj.generate_member_name_conversion_dict()
             tmp_abundance = {}
-            for name, fraction in abundance:
+            for name, fraction in abundance.items():
                 tmp_abundance[name_conversion[name]] = fraction
             com_model_obj.convert_to_fixed_abundance()
             com_model_obj.apply_fixed_abundance(tmp_abundance)

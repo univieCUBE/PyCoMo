@@ -98,7 +98,7 @@ def read_abundance_from_file(file):
     :param file: Path to the abundance csv file
     :return: An abundance dictionary with community members as keys and fractions as values
     """
-    endings = {"sbml", "json", "mat", "yaml", "yml"}
+    endings = {".sbml", ".xml", ".json", ".mat", ".yaml", ".yml"}
     abd_df = pd.read_csv(file, sep=",", header=None)
     abd_dict = {}
     if len(abd_df.columns) != 2:
@@ -107,7 +107,7 @@ def read_abundance_from_file(file):
     for idx, row in abd_df.iterrows():
         model = row["model"]
         if str(os.path.splitext(model)[1]) in endings:
-            model = model.replace(str(os.path.splitext(file)[1]), "")
+            model = model.replace(str(os.path.splitext(model)[1]), "")
         fraction = float(row["fraction"])
         abd_dict[model] = fraction
     return abd_dict
