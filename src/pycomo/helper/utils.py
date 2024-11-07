@@ -99,7 +99,7 @@ def read_abundance_from_file(file):
     :return: An abundance dictionary with community members as keys and fractions as values
     """
     endings = {"sbml", "json", "mat", "yaml", "yml"}
-    abd_df = pd.read_csv(file, sep=",")
+    abd_df = pd.read_csv(file, sep=",", header=None)
     abd_dict = {}
     if len(abd_df.columns) != 2:
         raise ValueError("Abundance file must contain exactly 2 columns")
