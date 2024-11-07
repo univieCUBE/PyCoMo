@@ -609,7 +609,6 @@ class CommunityModel:
     member_models: List[SingleOrganismModel]
     name: str
     medium_flag: bool = False
-    abundance_flag: bool = False
     mu_c: float = 1.
     fixed_abundance_flag: bool = False
     fixed_growth_rate_flag: bool = False
@@ -714,7 +713,7 @@ class CommunityModel:
             print(f"No community model generated yet. Generating now:")
             self.generate_community_model()
             print(f"Generated community model.")
-            self.abundance_flag = False
+            self.fixed_abundance_flag = False
             self.medium_flag = False
         return self._model
 
