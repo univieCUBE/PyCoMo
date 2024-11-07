@@ -1377,11 +1377,16 @@ class CommunityModel:
                 raise ValueError
             correction_factor = 1 / sum(abd_dict.values())
             for name, abundance in abd_dict.items():
-                abd_dict[name] = abundance * correction_factor
+                new_abundance = abundance * correction_factor
+                abd_dict[name] = new_abundance
             print(f"Correction applied. New abundances are:\n{abd_dict}")
             if not np.isclose([sum(abd_dict.values())], [1.]):
                 raise ValueError(f"Abundances do not sum up to 1: {abd_dict}")
-            if np.isnan(abd_dict.values()).any():
+            print(abd_dict.values())
+            print(abd_dict)
+            for v in abd_dict.values():
+                print(type(v))
+            if np.isnan(list(abd_dict.values())).any():
                 raise ValueError(f"Abundances contain NaN values: {abd_dict}")
 
         # Extend abundances to include all organisms of model
@@ -2272,8 +2277,14 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         elif isinstance(abundance, dict):
             name_conversion = com_model_obj.generate_member_name_conversion_dict()
             tmp_abundance = {}
-            for name, fraction in abundance.items():
-                tmp_abundance[name_conversion[name]] = fraction
+            try:
+                for name, fraction in abundance.items():
+                    tmp_abundance[name_conversion[name]] = fraction
+            except KeyError as e:
+                err_msg = f"Error: Some names in the abundances are not part of the model." \
+                        f"\n\tAbundances: {abundance.keys()}" \
+                        f"\n\tOrganisms in model: {com_model_obj.get_member_names()}"
+                raise KeyError(err_msg)
             com_model_obj.convert_to_fixed_abundance()
             com_model_obj.apply_fixed_abundance(tmp_abundance)
         else:
