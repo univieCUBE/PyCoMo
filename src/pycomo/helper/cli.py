@@ -5,7 +5,7 @@ import argparse
 __description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 
 def create_arg_parser():
@@ -132,21 +132,21 @@ def check_args(args):
     elif args.abd_file is not None:
         args.abundance = args.abd_file
 
-    args.fba_solution_path = None
+    args.fba_solution_file = None
     if args.fba_flux:
-        args.fba_solution_path = os.path.join(args.output_dir, f"{args.name}_fba_flux.csv")
+        args.fba_solution_file = f"{args.name}_fba_flux.csv"
 
-    args.fva_solution_path = None
+    args.fva_solution_file = None
     if args.fva_flux is not None:
-        args.fva_solution_path = os.path.join(args.output_dir, f"{args.name}_fva_flux.csv")
+        args.fva_solution_file = f"{args.name}_fva_flux.csv"
 
-    args.fba_interaction_path = None
+    args.fba_interaction_file = None
     if args.fba_interaction:
-        args.fba_interaction_path = os.path.join(args.output_dir, f"{args.name}_fba_interaction_flux.csv")
+        args.fba_interaction_file = f"{args.name}_fba_interaction_flux.csv"
 
-    args.fva_interaction_path = None
+    args.fva_interaction_file = None
     if args.fva_interaction:
-        args.fva_interaction_path = os.path.join(args.output_dir, f"{args.name}_fva_interaction_flux.csv")
+        args.fva_interaction_file = f"{args.name}_fva_interaction_flux.csv"
 
     args.sbml_output_file = None
     if args.save_sbml:

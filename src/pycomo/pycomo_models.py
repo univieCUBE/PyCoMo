@@ -2199,8 +2199,8 @@ class CommunityModel:
 
 def doall(model_folder="", models=None, com_model=None, out_dir="", community_name="community_model",
           fixed_growth_rate=None, abundance="equal", medium=None,
-          fba_solution_path=None, fva_solution_path=None, fva_solution_threshold=0.9, fba_interaction_path=None,
-          fva_interaction_path=None, composition_agnostic=False, sbml_output_file=None, return_as_cobra_model=False,
+          fba_solution_file=None, fva_solution_file=None, fva_solution_threshold=0.9, fba_interaction_file=None,
+          fva_interaction_file=None, composition_agnostic=False, sbml_output_file=None, return_as_cobra_model=False,
           merge_via_annotation=None, loopless=True, num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
@@ -2217,11 +2217,11 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     :param abundance: Sets the community metabolic model to fixed abundance state. This parameter can be either None,
         equal, or an abundance dict (community member names as keys and fractions as values).
     :param medium: Path to a medium file to be applied to the community metabolic model
-    :param fba_solution_path: Run FBA and save the solution to this file
-    :param fva_solution_path: Run FVA and save the solution to this file
+    :param fba_solution_file: Run FBA and save the solution to this file
+    :param fva_solution_file: Run FVA and save the solution to this file
     :param fva_solution_threshold: The fraction of the objective optimum needed to be reached in FVA
-    :param fba_interaction_path: Run FBA to calculate cross-feeding interactions and save the solution to this file
-    :param fva_interaction_path: Run FVA to calculate cross-feeding interactions and save the solution to this file
+    :param fba_interaction_file: Run FBA to calculate cross-feeding interactions and save the solution to this file
+    :param fva_interaction_file: Run FVA to calculate cross-feeding interactions and save the solution to this file
     :param composition_agnostic: Run FVA with relaxed constraints (composition agnostic)
     :param sbml_output_file: If a filename is given, save the community metabolic model as SBML file
     :param return_as_cobra_model: If true, returns the community metabolic model as COBRApy model object, otherwise as
@@ -2304,15 +2304,15 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     if sbml_output_file is not None:
         com_model_obj.save(os.path.join(out_dir, sbml_output_file))
 
-    if fba_solution_path is not None:
+    if fba_solution_file is not None:
         try:
-            com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_path))
+            com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_file))
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
 
-    if fva_solution_path is not None:
+    if fva_solution_file is not None:
         try:
-            com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_path),
+            com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_file),
                                                    fraction_of_optimum=fva_solution_threshold,
                                                    processes=num_cores,
                                                    composition_agnostic=composition_agnostic,
@@ -2320,23 +2320,23 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
 
-    if fva_interaction_path is not None:
+    if fva_interaction_file is not None:
         try:
             interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False,
                                                                           composition_agnostic=composition_agnostic,
                                                                           loopless=loopless,
                                                                           processes=num_cores)
-            logger.info(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_path)}")
-            interaction_df.to_csv(os.path.join(out_dir, fva_interaction_path), sep="\t", header=True,
+            logger.info(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_file)}")
+            interaction_df.to_csv(os.path.join(out_dir, fva_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
 
-    if fba_interaction_path is not None:
+    if fba_interaction_file is not None:
         try:
             interaction_df = com_model_obj.potential_metabolite_exchanges(fba=True)
-            logger.info(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_path)}")
-            interaction_df.to_csv(os.path.join(out_dir, fba_interaction_path), sep="\t", header=True,
+            logger.info(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_file)}")
+            interaction_df.to_csv(os.path.join(out_dir, fba_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
@@ -2363,9 +2363,9 @@ def main():
     if args.is_community:
         doall(com_model=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
               medium=args.medium,
-              fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
-              fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
-              fva_interaction_path=args.fva_interaction_path,
+              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fva_interaction_file=args.fva_interaction_file,
               sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
@@ -2375,9 +2375,9 @@ def main():
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
         doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
               medium=args.medium,
-              fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
-              fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
-              fva_interaction_path=args.fva_interaction_path,
+              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fva_interaction_file=args.fva_interaction_file,
               sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
@@ -2386,9 +2386,9 @@ def main():
     else:
         doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
               medium=args.medium,
-              fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
-              fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
-              fva_interaction_path=args.fva_interaction_path,
+              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fva_interaction_file=args.fva_interaction_file,
               sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
