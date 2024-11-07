@@ -148,8 +148,8 @@ def check_args(args):
     if args.fva_interaction:
         args.fva_interaction_path = os.path.join(args.output_dir, f"{args.name}_fva_interaction_flux.csv")
 
-    args.sbml_output_path = None
+    args.sbml_output_file = None
     if args.save_sbml:
-        args.sbml_output_path = os.path.join(args.output_dir, f"{args.name}.xml")
+        args.sbml_output_file = f"{args.name}.xml"
 
     return args

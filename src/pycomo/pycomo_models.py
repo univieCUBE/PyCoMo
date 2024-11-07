@@ -1381,10 +1381,6 @@ class CommunityModel:
             print(f"Correction applied. New abundances are:\n{abd_dict}")
             if not np.isclose([sum(abd_dict.values())], [1.]):
                 raise ValueError(f"Abundances do not sum up to 1: {abd_dict}")
-            print(abd_dict.values())
-            print(abd_dict)
-            for v in abd_dict.values():
-                print(type(v))
             if np.isnan(list(abd_dict.values())).any():
                 raise ValueError(f"Abundances contain NaN values: {abd_dict}")
 
@@ -2246,6 +2242,10 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         # Either from folder or as list of file names or list of cobra models
         if model_folder != "":
             named_models = load_named_models_from_dir(model_folder)
+            if len(named_models) == 0:
+                raise ValueError(
+                    f"No models found in the input models' folder. \nPlease make sure the selected folder contains "
+                    f"metabolic model files.")
         elif not isinstance(models, list) or len(models) == 0:
             raise ValueError(f"No models supplied to the doall function. Please supply either a path to the folder "
                              f"containing the models to the model_folder variable or a list of filepaths or cobra "
@@ -2366,7 +2366,7 @@ def main():
               fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
               fva_interaction_path=args.fva_interaction_path,
-              sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
@@ -2378,7 +2378,7 @@ def main():
               fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
               fva_interaction_path=args.fva_interaction_path,
-              sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
@@ -2389,7 +2389,7 @@ def main():
               fba_solution_path=args.fba_solution_path, fva_solution_path=args.fva_solution_path,
               fva_solution_threshold=args.fva_flux, fba_interaction_path=args.fba_interaction_path,
               fva_interaction_path=args.fva_interaction_path,
-              sbml_output_file=args.sbml_output_path, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
