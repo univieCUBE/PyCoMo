@@ -2,10 +2,10 @@ import os
 import sys
 import argparse
 
-__description__ = ('A package for generating community metabolic models from single species/strain models.')
+__description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
-__version__ = "0.1.3"
+__version__ = "0.2.4"
 
 
 def create_arg_parser():
@@ -51,11 +51,17 @@ def create_arg_parser():
                               help="the medium to be used in the community model, as a comma separated file "
                                    "containing a column 'compounds' and a column 'maxFlux'.")
 
+    pg_com_model.add_argument('--num-cores', type=int,
+                              help="the number of cores to be used for FVA")
+
     # All parameters regarding outputs to be produced
     pg_output = parser.add_argument_group('Output parameters')
 
     pg_output.add_argument('-o', '--output-dir', default=os.getcwd(), type=str,
                            help="the output directory to store results (default is the current working directory)")
+
+    pg_output.add_argument('--save-sbml', action='store_true', default=False,
+                           help="save the community metabolic model as sbml file")
 
     pg_output.add_argument('--fba-flux', action='store_true',
                            help="run FBA on the community model and store the flux vector in a file")
@@ -72,6 +78,13 @@ def create_arg_parser():
                            help="run FVA on the community model and store the flux of exchange metabolites and "
                                 "whether they are cross-fed in a file. Set the threshold of the objective that needs "
                                 "to be achieved.")
+
+    pg_output.add_argument('--composition-agnostic', action='store_true', default=False,
+                           help="run FVA with relaxed constraints, to calculate all possible cross-feeding "
+                                "interactions across all community growth-rates and abundance profiles.")
+
+    pg_output.add_argument('--loopless', type=bool, default=True,
+                           help="run FVA with loop correction (on by default)")
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -100,9 +113,9 @@ def check_args(args):
         if not 0. <= args.fva_flux <= 1.:
             raise ValueError("The fva-flux argument needs to be between 0. and 1. (inclusive).")
 
-    if args.fva_flux is not None:
-        if not 0. <= args.fva_flux <= 1.:
-            raise ValueError("The fva-flux argument needs to be between 0. and 1. (inclusive).")
+    if args.num_cores is not None:
+        if not 0 < args.num_cores:
+            raise ValueError("The number of cores must be greater than 0.")
 
     if args.abd_file is not None and not os.path.isfile(args.abd_file):
         raise ValueError("The abundance file is not a file or does not exist")
@@ -119,22 +132,24 @@ def check_args(args):
     elif args.abd_file is not None:
         args.abundance = args.abd_file
 
-    args.fba_solution_path = None
+    args.fba_solution_file = None
     if args.fba_flux:
-        args.fba_solution_path = os.path.join(args.output_dir, f"{args.name}_fba_flux.csv")
+        args.fba_solution_file = f"{args.name}_fba_flux.csv"
 
-    args.fva_solution_path = None
+    args.fva_solution_file = None
     if args.fva_flux is not None:
-        args.fva_solution_path = os.path.join(args.output_dir, f"{args.name}_fva_{args.fva_flux}_flux.csv")
+        args.fva_solution_file = f"{args.name}_fva_flux.csv"
 
-    args.fba_interaction_path = None
+    args.fba_interaction_file = None
     if args.fba_interaction:
-        args.fba_interaction_path = os.path.join(args.output_dir, f"{args.name}_fba_flux.csv")
+        args.fba_interaction_file = f"{args.name}_fba_interaction_flux.csv"
 
-    args.fva_interaction_path = None
+    args.fva_interaction_file = None
     if args.fva_interaction:
-        args.fva_interaction_path = os.path.join(args.output_dir, f"{args.name}_fva_{args.fva_interaction}_flux.csv")
+        args.fva_interaction_file = f"{args.name}_fva_interaction_flux.csv"
 
-    args.sbml_output_path = os.path.join(args.output_dir, f"{args.name}.xml")
+    args.sbml_output_file = None
+    if args.save_sbml:
+        args.sbml_output_file = f"{args.name}.xml"
 
     return args

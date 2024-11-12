@@ -3,9 +3,22 @@ This module contains some utility function related to cobrapy community models.
 """
 import pandas as pd
 import cobra
-import libsbml
 import os
 import re
+from cobra.util.process_pool import ProcessPool
+from cobra.core import Configuration
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.info('Utils Logger initialized.')
+
+configuration = Configuration()
 
 
 def make_string_sbml_id_compatible(string, remove_ascii_escapes=False, remove_trailing_underscore=False):
@@ -60,7 +73,7 @@ def remove_dunder_from_ascii_escape(match_obj):
     :return: The match object with the outer underscore characters removed
     """
     if match_obj.group() is not None:
-        print(match_obj.group())
+        logger.debug(match_obj.group())
         return match_obj.group()[1:-1]
 
 
@@ -95,60 +108,61 @@ def read_abundance_from_file(file):
     :param file: Path to the abundance csv file
     :return: An abundance dictionary with community members as keys and fractions as values
     """
-    endings = {"sbml", "json", "mat", "yaml", "yml"}
-    abd_df = pd.read_csv(file, sep=",")
+    endings = {".sbml", ".xml", ".json", ".mat", ".yaml", ".yml"}
+    abd_df = pd.read_csv(file, sep=",", header=None)
     abd_dict = {}
-    assert len(abd_df.columns) == 2
+    if len(abd_df.columns) != 2:
+        raise ValueError("Abundance file must contain exactly 2 columns")
     abd_df.columns = ["model", "fraction"]
     for idx, row in abd_df.iterrows():
         model = row["model"]
         if str(os.path.splitext(model)[1]) in endings:
-            model = model.replace(str(os.path.splitext(file)[1]), "")
+            model = model.replace(str(os.path.splitext(model)[1]), "")
         fraction = float(row["fraction"])
         abd_dict[model] = fraction
     return abd_dict
 
 
-def load_named_model(file, format="sbml"):
+def load_named_model(file, file_format="sbml"):
     """
     Loads a metabolic model from file and returns the model together with the model file name as name.
 
     :param file: Path to the model file
-    :param format: The file format of the model. Supported formats are sbml, json, mat and yaml/yml
+    :param file_format: The file format of the model. Supported formats are sbml, json, mat and yaml/yml
     :return: the metabolic model as COBRApy model and the model name
     """
     name = os.path.split(file)[1].replace(str(os.path.splitext(file)[1]), "")
-    if format == "sbml":
+    if file_format == "sbml":
         model = cobra.io.read_sbml_model(file)
-    elif format == "json":
+    elif file_format == "json":
         model = cobra.io.load_json_model(file)
-    elif format == "mat":
+    elif file_format == "mat":
         model = cobra.io.load_matlab_model(file)
-    elif format in ["yaml", "yml"]:
+    elif file_format in ["yaml", "yml"]:
         model = cobra.io.load_yaml_model(file)
     else:
         raise ValueError(f"Incorrect format for model. Please use either sbml or json.")
     return model, name
 
 
-def load_named_models_from_dir(path, format="sbml"):
+def load_named_models_from_dir(path, file_format="sbml"):
     """
     Loads all metabolic models from file in the specified directory and of given format. Supported formats are sbml,
     json, mat and yaml/yml.
 
     :param path: Path to the model file directory
-    :param format: The file format of the models. Supported formats are sbml, json, mat and yaml/yml
+    :param file_format: The file format of the models. Supported formats are sbml, json, mat and yaml/yml
     :return: A dictionary with model names as keys and metabolic models (COBRApy model objects) as values
     """
     endings = {"sbml": [".xml"], "json": [".json"], "mat": [".mat"], "yaml": [".yaml", ".yml"]}
     named_models = {}
     files = os.listdir(path)
-    expected_ending = endings[format]
+    expected_ending = endings[file_format]
     for file in files:
         if not os.path.isfile(os.path.join(path, file)) or str(os.path.splitext(file)[1]) not in expected_ending:
             continue
         else:
-            model, name = load_named_model(os.path.join(path, file), format=format)
+            model, name = load_named_model(os.path.join(path, file), file_format=file_format)
             named_models[name] = model
     return named_models
 
@@ -185,14 +199,14 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
         if expected_biomass_id in [met.id for met in biomass_products]:
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         elif expected_biomass_id in [met.id for met in model.metabolites]:
-            print(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
+            logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         else:
             raise AssertionError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
     elif len(biomass_products) == 0:
         # No metabolites produced
         if generate_if_none:
-            print(f"Note: no products in the objective function, adding biomass to it.")
+            logger.info(f"Note: no products in the objective function, adding biomass to it.")
             biomass_met = cobra.Metabolite(f"cpd11416_{shared_compartment_name}", name='Biomass',
                                            compartment=shared_compartment_name)
             model.add_metabolites([biomass_met])
@@ -204,7 +218,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
     else:
         # Multiple products in the objective, making biomass metabolites ambiguous
         if generate_if_none:
-            print(f"Note: no products in the objective function, adding biomass to it.")
+            logger.info(f"Note: no products in the objective function, adding biomass to it.")
             biomass_met = cobra.Metabolite(f"cpd11416_{shared_compartment_name}", name='Biomass',
                                            compartment=shared_compartment_name)
             model.add_metabolites([biomass_met])
@@ -237,7 +251,9 @@ def make_model_ids_sbml_conform(model):
         if not group.name:
             group.name = group.id
         if group.id:
-            group.id = make_string_sbml_id_compatible(group.id, remove_ascii_escapes=True, remove_trailing_underscore=True)
+            group.id = make_string_sbml_id_compatible(group.id,
+                                                      remove_ascii_escapes=True,
+                                                      remove_trailing_underscore=True)
 
     rename_dict = {}
     for gene in model.genes:
@@ -332,7 +348,7 @@ def get_exchange_metabolites(model):
     exchange_metabolites = {}
     for reaction in model.exchanges:
         if len(reaction.metabolites) != 1:
-            print(f"Error: exchange reaction {reaction.id} has more than 1 metabolite")
+            logger.error(f"Error: exchange reaction {reaction.id} has more than 1 metabolite")
         exchange_met = list(reaction.metabolites.keys())[0]
         exchange_metabolites[exchange_met.id] = exchange_met
     return exchange_metabolites
@@ -518,6 +534,46 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
     return metabolites_without_overlap
 
 
+def check_mass_balance_fomula_safe(model):
+    """
+    Checks a model's reactions for mass and charge balance. In case the mass / charge balance check fails due to
+    wrongly formatted metabolite formulae, add reaction and metabolites to unbalanced reactions and throw a warning.
+
+    :param model: The model to check
+    :return: Dictionary of key reaction and value: dictionary (metabolite: float)
+    """
+    _NOT_MASS_BALANCED_TERMS = {
+        "SBO:0000627",  # EXCHANGE
+        "SBO:0000628",  # DEMAND
+        "SBO:0000629",  # BIOMASS
+        "SBO:0000631",  # PSEUDOREACTION
+        "SBO:0000632",  # SINK
+    }
+
+    unbalanced = {}
+    for reaction in model.reactions:
+        if reaction.annotation.get("sbo") not in _NOT_MASS_BALANCED_TERMS:
+            try:
+                balance = reaction.check_mass_balance()
+                if balance:
+                    unbalanced[reaction] = balance
+            except ValueError:
+                logger.warning(f"Warning: not wrongly formatted metabolite formula in metabolites of reaction {reaction.id}")
+                unbalanced[reaction] = reaction.metabolites
+    return unbalanced
+
+
+def get_f_reactions(model):
+    """
+    Get the IDs of all fraction reactionsm in a PyCoMo community metabolic model.
+
+    :param model: A PyCoMo community metabolic model
+    :return: A set of all fraction reactions
+    """
+    return model.reactions.query(
+        lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+
+
 def relax_reaction_constraints_for_zero_flux(model):
     """
     This function relaxes all constraints of a model to allow a flux of 0 in all reactions.
@@ -531,25 +587,66 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def find_loops_in_model(model):
+def _init_loop_worker(model):
+    """
+    Initialize a global model object for multiprocessing.
+
+    :param model: The model to perform find loops in
+    """
+
+    global _model
+    _model = model
+
+
+def _find_loop_step(rxn_id):
+    rxn = _model.reactions.get_by_id(rxn_id)
+    _model.objective = rxn.id
+    solution = _model.optimize("minimize")
+    min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+    solution = _model.optimize("maximize")
+    max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+    return rxn_id, max_flux, min_flux
+
+
+def find_loops_in_model(model, processes=None):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
 
     :param model: Model to be searched for thermodynamically infeasible cycles
+    :param processes: The number of processes to use
     :return: A dataframe of reactions and their flux range, if they can carry non-zero flux without metabolite input
     """
     loop_model = model.copy()
     loop_model.medium = {}
     relax_reaction_constraints_for_zero_flux(loop_model)
     loops = []
-    for rxn in loop_model.reactions:
-        loop_model.objective = rxn.id
-        solution = loop_model.optimize("minimize")
-        min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        solution = loop_model.optimize("maximize")
-        max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if min_flux != 0. or max_flux != 0.:
-            loops.append({"reaction": rxn.id, "min_flux": min_flux, "max_flux": max_flux})
+    reaction_ids = [r.id for r in loop_model.reactions]
+
+    num_rxns = len(reaction_ids)
+
+    if processes is None:
+        processes = configuration.processes
+
+    processes = min(processes, num_rxns)
+
+    if processes > 1:
+        chunk_size = len(reaction_ids) // processes
+        with ProcessPool(
+                processes,
+                initializer=_init_loop_worker,
+                initargs=(tuple([loop_model])),
+        ) as pool:
+            for rxn_id, max_flux, min_flux in pool.imap_unordered(
+                    _find_loop_step, reaction_ids, chunksize=chunk_size
+            ):
+                if min_flux != 0. or max_flux != 0.:
+                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+    else:
+        _init_loop_worker(loop_model)
+        for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+            if min_flux != 0. or max_flux != 0.:
+                loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+
     loops_df = pd.DataFrame(loops)
     return loops_df

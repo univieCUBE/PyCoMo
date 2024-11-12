@@ -11,7 +11,11 @@
 # In[1]:
 
 
+from pathlib import Path
 import sys
+import cobra
+import os
+
 
 # ### Importing PyCoMo ###
 # As PyCoMo is currently only available as a local package, the direct path to the package directory needs to be used on import.
@@ -19,9 +23,10 @@ import sys
 # In[2]:
 
 
-path_root = "../src/pycomo"  # Change path according to your PyCoMo location
+path_root = "../src"  # Change path according to your PyCoMo location
 sys.path.append(str(path_root))
-from src import pycomo as pycomo
+import pycomo
+
 
 # ## Creating a Community Model ##
 # The creation of a community model consists of 3 steps:
@@ -33,7 +38,7 @@ from src import pycomo as pycomo
 # 
 # In this tutorial we are using metabolic models from the AGORA collection. The models were retrieved from www.vmh.life, and are stored in the data folder of the repository. The selection of models and the resulting community represents a cystic fibrosis airway community, as done by Henson et al. (www.doi.org/10.1128/mSystems.00026-19)
 
-# In[4]:
+# In[3]:
 
 
 test_model_dir = "../data/use_case/henson"
@@ -42,7 +47,7 @@ named_models = pycomo.load_named_models_from_dir(test_model_dir)
 
 # The models and file names were extracted and stored in named_models. Let's check the contents:
 
-# In[5]:
+# In[4]:
 
 
 named_models
@@ -53,7 +58,7 @@ named_models
 
 # One of the requirements for a community metabolic model is a common biomass function. To construct it, PyCoMo requires the biomass of each member represented as a single metabolite. This biomass metabolite ID can be specified when constructing the SingleOrganismModel objects. However, it can also be found or generated automatically, by setting the biomass reaction as the objective of the model. Let's check if the biomass function is the objective in all the models
 
-# In[6]:
+# In[5]:
 
 
 for model in named_models.values():
@@ -62,7 +67,7 @@ for model in named_models.values():
 
 # With the objective being the biomass function in all models, the biomass metabolite does not need to be specified.
 
-# In[7]:
+# In[6]:
 
 
 single_org_models = []
@@ -75,7 +80,7 @@ for name, model in named_models.items():
 # ### Creating a community model ###
 # With the member models prepared, the community model can be generated. The first step is to create a CommunityModel objects from the member models. The matching of the exchange metabolites can be achieved in two ways: matching via identical metabolite IDs, or via annotation fields. In this tutorial and as all the models come from the same source, matching via identical metabolite IDs will be used.
 
-# In[8]:
+# In[7]:
 
 
 community_name = "henson_community_model"
@@ -84,7 +89,7 @@ com_model_obj = pycomo.CommunityModel(single_org_models, community_name)
 
 # The cobra model of the community will generated the first time it is needed. We can enforce this now, by calling it via .model
 
-# In[9]:
+# In[8]:
 
 
 com_model_obj.model
@@ -100,13 +105,13 @@ com_model_obj.model
 # - Summary behaves the same as the summary method of COBRApy, displaying the the solution of FBA and its exchange metabolites. In the CommunityModel summary, the exchange reactions of metabolites responsible for scaling the flux bounds to the community composition are hidden.
 # - The report function displays information on the model structure: the number of metabolites, reactions, genes, etc., but also quality control measures on mass and charge balance and internal loops.
 
-# In[10]:
+# In[9]:
 
 
 com_model_obj.summary()
 
 
-# In[11]:
+# In[10]:
 
 
 com_model_obj.report()
@@ -115,7 +120,7 @@ com_model_obj.report()
 # ### Setting the growth rate ###
 # By default the community model object will have the structure of fixe growth rate. This means, the fractions of the community member abundance is allowed to vary during simulations, but the individual and community growth rate is set to a fixed value (default: 1.0). The next thing we will try is to set the community growth rate to a different value and do a FBA.
 
-# In[12]:
+# In[11]:
 
 
 com_model_obj.apply_fixed_growth_rate(0.5)
@@ -125,7 +130,7 @@ com_model_obj.summary()
 # ### Setting the community member composition ###
 # The model structure can be changed to fixed abundance, but variable growth rate. To do so, a conversion function needs to be called. Here we then change the community abundance to equal abundances.
 
-# In[13]:
+# In[12]:
 
 
 com_model_obj.convert_to_fixed_abundance()
@@ -137,25 +142,25 @@ com_model_obj.summary()
 # ## Saving and loading community models ##
 # Community model objects can be saved and loaded into SBML files. This is different from the other available option to save the cobra model of the community model objects, as the abundance fractions of the organisms are written into the file as well. Saving and loading the community model can be done like this:
 
-# In[14]:
+# In[13]:
 
 
 com_model_obj.save("../data/toy/output/henson_com_model.xml")
 
 
-# In[15]:
+# In[14]:
 
 
 com_model_obj_loaded = pycomo.CommunityModel.load("../data/toy/output/henson_com_model.xml")
 
 
-# In[16]:
+# In[15]:
 
 
 com_model_obj_loaded
 
 
-# In[17]:
+# In[16]:
 
 
 com_model_obj_loaded.model.optimize()
@@ -164,7 +169,7 @@ com_model_obj_loaded.model.optimize()
 # ### Quality Checks ###
 # One of the quality checks that should be done is to look into all unbalanced reactions (mass and charge) in the entire model. As said before, such reactions should only exist in the case of boundary reactions, such as exchange, sink and source reactions.
 
-# In[18]:
+# In[17]:
 
 
 com_model_obj.get_unbalanced_reactions()
@@ -175,20 +180,20 @@ com_model_obj.get_unbalanced_reactions()
 # ### Creating the community model ###
 # We repeat the steps as before.
 
-# In[19]:
+# In[18]:
 
 
 test_model_dir = "../data/use_case/koch"
 named_models = pycomo.load_named_models_from_dir(test_model_dir)
 
 
-# In[20]:
+# In[19]:
 
 
 named_models
 
 
-# In[21]:
+# In[20]:
 
 
 single_org_models = []
@@ -202,7 +207,7 @@ com_model_obj = pycomo.CommunityModel(single_org_models, community_name)
 
 # With the community model generated, we set the medium for the analysis, as done by Koch et al.
 
-# In[22]:
+# In[21]:
 
 
 medium = {
@@ -221,7 +226,7 @@ com_model_obj.model.reactions.get_by_id("EX_H2_EX_medium").upper_bound = 0.
 # ### Calculating potential metabolite exchange ###
 # All potential exchange metabolite fluxes and cross-feeding interactions can be calculated with the _potential_metabolite_exchanges_ method. This is a single FVA, but with a minimum objective of 0 and relaxed constraints. All reaction constraints are changed to include the value 0, which circumvents cases where a specific flux through a reaction is required, leading to infeasible solutions for certain community compositions.
 
-# In[23]:
+# In[22]:
 
 
 com_model_obj.potential_metabolite_exchanges()
@@ -229,7 +234,7 @@ com_model_obj.potential_metabolite_exchanges()
 
 # ### Plotting the maxiumum growth rate over the composition space ###
 
-# In[24]:
+# In[23]:
 
 
 import pandas as pd
@@ -259,7 +264,7 @@ for i in range (0,100,1):  # fraction of D. vulgaris
 growth_df = pd.DataFrame(rows)
 
 
-# In[25]:
+# In[24]:
 
 
 import matplotlib.pyplot as plt
