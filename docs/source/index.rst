@@ -10,8 +10,11 @@ Welcome to PyCoMo's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   classes
    PyCoMo_basics
+   max_growth_rate_tutorial
+   loopless_fva_tutorial
+   classes
+   
 
 
 

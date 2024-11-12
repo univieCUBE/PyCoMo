@@ -10,19 +10,19 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-#import os
-#import sys
-#sys.path.insert(0, os.path.abspath('../src'))
+import os
+import sys
+sys.path.insert(0, os.path.abspath('../../src'))
 
 
 # -- Project information -----------------------------------------------------
 
 project = 'PyCoMo'
-copyright = '2023, Michael Predl'
+copyright = '2024, Michael Predl'
 author = 'Michael Predl, Marianne Mießkes'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.3'
+release = '0.2.4'
 
 
 # -- General configuration ---------------------------------------------------
