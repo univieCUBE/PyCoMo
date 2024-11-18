@@ -3,16 +3,30 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to PyCoMo's documentation!
+Documentation for PyCoMo
 ==================================
+
+
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Basics
 
+   installation
    PyCoMo_basics
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Tutorials
+
    max_growth_rate_tutorial
    loopless_fva_tutorial
+
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API
+
    classes
    
 
