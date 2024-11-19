@@ -1522,12 +1522,18 @@ class CommunityModel:
         medium_dict = read_medium_from_file(file_path, comp=f"_{self.shared_compartment_name}")
         self.medium = medium_dict
 
-    def apply_medium(self):
+    def apply_medium(self, medium=None):
         """
         Applies the medium that is specified in the medium attribute to the community metabolic model
 
+        :param medium: Optional. A dictionary with exchange reaction IDs as keys and the maximum
+            flux of the respective metabolite as value. If none is given, the medium in self.medium is applied.
         :return: The updated model
         """
+
+        if medium is not None:
+            self.medium = medium
+
         test_if_medium_exists = self.medium
         medium_model = self.model
         # Exclude metabolites from the medium that are not part of the model
