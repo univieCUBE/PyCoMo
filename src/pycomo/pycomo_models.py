@@ -2110,10 +2110,18 @@ class CommunityModel:
                     df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
                 # fix abundances to a point within the feasible composition space of the current mu
                 # get name of the member for each row in the fva df
-                member_id = [string[0:-18] for string in df["reaction_id"]]
+                member_id = [string.replace("_fraction_reaction", "") for string in df["reaction_id"]]
                 # dataframes with min and max flux values of fraction reactions
-                lb_df = (df["min_flux"]).apply(lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance)
-                ub_df = (df["max_flux"])
+                # Ensure lower bounds close to zero are rounded to zero.
+                # This also helps with very small negative values.
+                lb_df = (df["min_flux"]).apply(
+                    lambda lb_x: 0. if close_to_zero(lb_x, t=10 ** (-sensitivity - 1)) else lb_x
+                ).apply(
+                    lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance
+                )
+                ub_df = (df["max_flux"]).apply(
+                    lambda ub_x: 0. if close_to_zero(ub_x, t=10**(-sensitivity-1)) else ub_x
+                )
                 logger.debug(df)
                 logger.debug(f"lb_df: {lb_df}")
                 # dataframe with range of possible abundances
