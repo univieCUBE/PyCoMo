@@ -925,14 +925,109 @@ class CommunityModel:
         no_medium = {}
         self.model.medium = no_medium
 
-        with self.model:
-            solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), processes=processes)
+        if processes is None:
+            processes = configuration.processes
+
+        f_bio_mets = {}
+        if self.fixed_growth_rate_flag:
+            mu_c = self.mu_c
+            self.apply_fixed_growth_rate(0.)
+
+            # Allow flux through the biomass reaction
+            self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
+            # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
+            # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows
+            # to discover a superset of possible metabolite exchanges.
+            for member_name in self.get_member_names():
+                biomass_rxn = self.model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                fraction_met = self.model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                f_bio_mets[member_name] = fraction_met
+                replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
+
+                fraction_rxn = self.model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+                fraction_rxn.bounds = 0., 0.
+                fraction_rxn_relaxed = fraction_rxn.copy()
+                fraction_rxn_relaxed.id = f"{member_name}_relaxed_fraction_reaction"
+                fraction_rxn_relaxed.bounds = 0., 1.
+                relaxed_stoich = {}
+                for met, coeff in fraction_rxn_relaxed.metabolites.items():
+                    if coeff < 0.:
+                        relaxed_stoich[met] = 0.
+
+                replace_metabolite_stoichiometry(fraction_rxn_relaxed, relaxed_stoich)
+                self.model.add_reactions([fraction_rxn_relaxed])
+
+            with self.model:
+                solution_df = find_loops_in_model(self.model,
+                                                  reactions=self.model.reactions.query(lambda x:
+                                                                                       x not in self.f_reactions),
+                                                  processes=processes,
+                                                  relax=False)
+
+            # Revert changes
+            self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
+            for member_name, fraction_met in f_bio_mets.items():
+                biomass_rxn = self.model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                biomass_rxn.add_metabolites({fraction_met: -1}, combine=True)
+                fraction_rxn = self.model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+                fraction_rxn.bounds = 0., 1.
+                self.model.remove_reactions([f"{member_name}_relaxed_fraction_reaction"])
+
+            self.apply_fixed_growth_rate(mu_c)
+        else:
+            self.convert_to_fixed_growth_rate(mu_c=0.)
+
+            # Allow flux through the biomass reaction
+            self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
+
+            # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
+            # organisms have their fluxes scaled by abundance, but their growth rate is not equal. This allows
+            # to discover a superset of possible metabolite exchanges.
+            for member_name in self.get_member_names():
+                biomass_rxn = self.model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                fraction_met = self.model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
+                f_bio_mets[member_name] = fraction_met
+                replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
+
+                fraction_rxn = self.model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+                fraction_rxn.bounds = 0., 0.
+                fraction_rxn_relaxed = fraction_rxn.copy()
+                fraction_rxn_relaxed.id = f"{member_name}_relaxed_fraction_reaction"
+                fraction_rxn_relaxed.bounds = 0., 1.
+                relaxed_stoich = {}
+                for met, coeff in fraction_rxn_relaxed.metabolites.items():
+                    if coeff < 0.:
+                        relaxed_stoich[met] = 0.
+
+                replace_metabolite_stoichiometry(fraction_rxn_relaxed, relaxed_stoich)
+                self.model.add_reactions([fraction_rxn_relaxed])
+
+            with self.model:
+                solution_df = find_loops_in_model(self.model,
+                                                  reactions=self.model.reactions.query(lambda x:
+                                                                                       x not in self.f_reactions),
+                                                  processes=processes,
+                                                  relax=False)
+
+            # Revert changes
+            self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
+            for member_name, fraction_met in f_bio_mets.items():
+                biomass_rxn = self.model.reactions.get_by_id(f"{member_name}_to_community_biomass")
+                biomass_rxn.add_metabolites({fraction_met: -1}, combine=True)
+                fraction_rxn = self.model.reactions.get_by_id(f"{member_name}_fraction_reaction")
+                fraction_rxn.bounds = 0., 1.
+                self.model.remove_reactions([f"{member_name}_relaxed_fraction_reaction"])
+
+            self.convert_to_fixed_abundance()
 
         self.medium = original_medium
         self.apply_medium()
 
-        return solution_df[
-            (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
+        if len(solution_df) > 0:
+            solution_df = solution_df[
+                (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
+
+        return solution_df
 
     def get_member_name_of_reaction(self, reaction):
         """

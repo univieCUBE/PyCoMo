@@ -608,20 +608,26 @@ def _find_loop_step(rxn_id):
     return rxn_id, max_flux, min_flux
 
 
-def find_loops_in_model(model, processes=None):
+def find_loops_in_model(model, reactions=None, processes=None, relax=True):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
 
     :param model: Model to be searched for thermodynamically infeasible cycles
+    :param reactions: The reactions to test for loops
     :param processes: The number of processes to use
+    :param relax: Relax reaction bounds to include 0
     :return: A dataframe of reactions and their flux range, if they can carry non-zero flux without metabolite input
     """
     loop_model = model.copy()
     loop_model.medium = {}
-    relax_reaction_constraints_for_zero_flux(loop_model)
+    if relax:
+        relax_reaction_constraints_for_zero_flux(loop_model)
     loops = []
-    reaction_ids = [r.id for r in loop_model.reactions]
+
+    if reactions is None:
+        reactions = loop_model.reactions
+    reaction_ids = [r.id for r in reactions]
 
     num_rxns = len(reaction_ids)
 
@@ -648,7 +654,7 @@ def find_loops_in_model(model, processes=None):
             if min_flux != 0. or max_flux != 0.:
                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
 
-    loops_df = pd.DataFrame(loops)
+    loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
     return loops_df
 
 
