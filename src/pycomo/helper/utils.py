@@ -655,9 +655,9 @@ def find_loops_in_model(model, processes=None):
 def replace_metabolite_stoichiometry(rxn, new_stoich):
     """
     This reaction allows for safely and reversibly assigning new reaction stoichiometry.
-    Assigning stoichiometry in add/subtract_metabolites method of cobrapy with combine set to False results in a KeyError,
-    if the metabolite was not previously part of the reaction.
-    As with the cobrapy add/subtract_metabolites method, the stoichiometry of metabolites that are not part of the new stoichiometry, are left unchanged.
+    Assigning stoichiometry in add/subtract_metabolites method of cobrapy with combine set to False results in a
+    KeyError, if the metabolite was not previously part of the reaction. As with the cobrapy add/subtract_metabolites
+    method, the stoichiometry of metabolites that are not part of the new stoichiometry, are left unchanged.
 
     Example: r1: a -> b; new_stoich: {c: -1}; => r1: a + c -> b
     Example: r1: a -> b; new_stoich: {a: 0}; => r1: -> b

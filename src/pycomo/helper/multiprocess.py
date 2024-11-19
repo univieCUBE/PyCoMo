@@ -78,10 +78,22 @@ def _add_loopless_constraints_and_objective(fluxes):
     for rxn in ko_candidate_rxns:
         flux = fluxes[rxn.id]
         if flux > 0:
-            rxn.bounds = max(0., rxn.lower_bound), min(flux, rxn.upper_bound)
+            lower_bound = max(0., rxn.lower_bound)
+            upper_bound = min(flux, rxn.upper_bound)
+            if not (upper_bound >= lower_bound):
+                # flux is lower than rxn.lower_bound due to numerical problems
+                logger.warning(f"Flux of reaction {rxn.id} is lower than lower bound: {flux} < {lower_bound}")
+                upper_bound = lower_bound
+            rxn.bounds = lower_bound, upper_bound
             objective_vars.append(rxn.forward_variable)
         elif flux < 0:
-            rxn.bounds = max(flux, rxn.lower_bound), min(0., rxn.upper_bound)
+            lower_bound = max(flux, rxn.lower_bound)
+            upper_bound = min(0., rxn.upper_bound)
+            if not (upper_bound >= lower_bound):
+                # flux is higher than rxn.upper_bound due to numerical problems
+                logger.warning(f"Flux of reaction {rxn.id} is higher than upper bound: {flux} > {upper_bound}")
+                upper_bound = lower_bound
+            rxn.bounds = lower_bound, upper_bound
             objective_vars.append(rxn.reverse_variable)
         else:
             rxn.bounds = 0, 0
@@ -92,9 +104,21 @@ def _add_loopless_constraints_and_objective(fluxes):
     for rxn in remaining_rxns:
         flux = fluxes[rxn.id]
         if flux > 0:
-            rxn.bounds = max(0., rxn.lower_bound), min(flux, rxn.upper_bound)
+            lower_bound = max(0., rxn.lower_bound)
+            upper_bound = min(flux, rxn.upper_bound)
+            if not (upper_bound >= lower_bound):
+                # flux is lower than rxn.lower_bound due to numerical problems
+                logger.warning(f"Flux of reaction {rxn.id} is lower than lower bound: {flux} < {lower_bound}")
+                upper_bound = lower_bound
+            rxn.bounds = lower_bound, upper_bound
         elif flux < 0:
-            rxn.bounds = max(flux, rxn.lower_bound), min(0., rxn.upper_bound)
+            lower_bound = max(flux, rxn.lower_bound)
+            upper_bound = min(0., rxn.upper_bound)
+            if not (upper_bound >= lower_bound):
+                # flux is higher than rxn.upper_bound due to numerical problems
+                logger.warning(f"Flux of reaction {rxn.id} is higher than upper bound: {flux} > {upper_bound}")
+                upper_bound = lower_bound
+            rxn.bounds = lower_bound, upper_bound
         else:
             rxn.bounds = 0, 0
 
