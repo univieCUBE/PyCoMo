@@ -650,3 +650,25 @@ def find_loops_in_model(model, processes=None):
 
     loops_df = pd.DataFrame(loops)
     return loops_df
+
+
+def replace_metabolite_stoichiometry(rxn, new_stoich):
+    """
+    This reaction allows for safely and reversibly assigning new reaction stoichiometry.
+    Assigning stoichiometry in add/subtract_metabolites method of cobrapy with combine set to False results in a KeyError,
+    if the metabolite was not previously part of the reaction.
+    As with the cobrapy add/subtract_metabolites method, the stoichiometry of metabolites that are not part of the new stoichiometry, are left unchanged.
+
+    Example: r1: a -> b; new_stoich: {c: -1}; => r1: a + c -> b
+    Example: r1: a -> b; new_stoich: {a: 0}; => r1: -> b
+
+    :param rxn: Target reaction
+    :param new_stoich: Dictionary with metabolites (string ID or cobra.Metabolite) as keys and floats as values.
+    """
+    stoich_to_subtract = {}
+    for k, v in rxn.metabolites.items():
+        if k.id in new_stoich.keys() or k in new_stoich.keys():
+            stoich_to_subtract[k] = v
+    rxn.subtract_metabolites(stoich_to_subtract, combine=True)
+    rxn.add_metabolites(new_stoich, combine=True)
+    return

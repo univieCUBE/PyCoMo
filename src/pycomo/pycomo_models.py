@@ -1034,7 +1034,7 @@ class CommunityModel:
         # create additional reactions for each biomass reaction of a suborganism
         for member, met in biomass_mets.items():
             rxn = merged_model.reactions.get_by_id(f"{member}_to_community_biomass")
-            rxn.add_metabolites({met: -1, biomass_met: 1}, combine=False)
+            replace_metabolite_stoichiometry(rxn, {met: -1, biomass_met: 1})
         # set mu_c for the community, default = 1
         self.apply_fixed_growth_rate(self.mu_c, merged_model)
 
@@ -1184,18 +1184,18 @@ class CommunityModel:
         if lower_bound != 0:
             coefficient = -self.max_flux if lower_bound < -self.max_flux else lower_bound
             fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
-            reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_lb: self._dummy_metabolite_scaling_factor})
         else:
-            reaction.add_metabolites({met_lb: 0}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_lb: 0})
             fraction_reaction_mets[met_lb] = 0
 
         if upper_bound != 0:
             coefficient = self.max_flux if upper_bound > self.max_flux else upper_bound
             fraction_reaction_mets[met_ub] = coefficient * self._dummy_metabolite_scaling_factor
-            reaction.add_metabolites({met_ub: -self._dummy_metabolite_scaling_factor}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_ub: -self._dummy_metabolite_scaling_factor})
         else:
             fraction_reaction_mets[met_ub] = 0
-            reaction.add_metabolites({met_ub: 0}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_ub: 0})
 
         # Relax reaction bounds
         if lower_bound < 0:
@@ -1208,7 +1208,7 @@ class CommunityModel:
             reaction.upper_bound = self.max_flux
 
         # Add fraction metabolites to the fraction reaction
-        fraction_reaction.add_metabolites(fraction_reaction_mets, combine=False)
+        replace_metabolite_stoichiometry(fraction_reaction, fraction_reaction_mets)
 
         # Add sink reactions for fraction mets
         self.add_sink_reactions_to_metabolites(model, metabolites_needing_sink_reactions)
@@ -1277,14 +1277,11 @@ class CommunityModel:
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
                 fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: flux})
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
                 self.model.add_metabolites(fraction_met)
-                if fraction_met in fraction_rxn.metabolites:
-                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
-                else:
-                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=True)
+                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: flux})
 
         model.repair()
 
@@ -1323,12 +1320,12 @@ class CommunityModel:
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
                 fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: 0})
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
                 if fraction_met in fraction_rxn.metabolites:
                     self.model.add_metabolites(fraction_met)
-                    fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                    replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: 0})
 
         # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
         model.reactions.get_by_id("abundance_reaction").bounds = (0., self.max_flux)
@@ -1402,7 +1399,7 @@ class CommunityModel:
             abd_rxn_mets[f_bio_met] = fraction
 
         abd_rxn = model.reactions.get_by_id("abundance_reaction")
-        abd_rxn.add_metabolites(abd_rxn_mets, combine=False)
+        replace_metabolite_stoichiometry(abd_rxn, abd_rxn_mets)
 
         self._abundance_dict = abd_dict
 
@@ -1490,20 +1487,20 @@ class CommunityModel:
                     if "_lb" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.lower_bound = -coeff / self._dummy_metabolite_scaling_factor
-                        rxn.add_metabolites({metabolite: 0}, combine=False)
-                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
+                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
                         metabolite.remove_from_model(True)
                     elif "_ub" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.upper_bound = coeff / self._dummy_metabolite_scaling_factor
-                        rxn.add_metabolites({metabolite: 0}, combine=False)
-                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
+                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
                         metabolite.remove_from_model(True)
                     elif "_f_biomass_met" in metabolite.id:
                         rxn = model.reactions.get_by_id(
                             metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
-                        rxn.add_metabolites({metabolite: 0}, combine=False)
-                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
+                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
                         metabolite.remove_from_model(True)
 
         for reaction in reactions_to_remove:
@@ -1645,7 +1642,7 @@ class CommunityModel:
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
                         f_bio_mets[member_name] = fraction_met
-                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                        replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
 
                 if loopless:
                     if verbose:
@@ -1686,7 +1683,7 @@ class CommunityModel:
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
                         f_bio_mets[member_name] = fraction_met
-                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                        replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
 
                 if loopless:
                     if verbose:
