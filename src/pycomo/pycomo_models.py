@@ -300,17 +300,17 @@ class SingleOrganismModel:
         mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - {self.biomass_met})
         return mets_without_exchg
 
-    def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
+    def convert_exchange_to_transfer_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
         """
         When preprocessing the model for merging into a community metabolic model, a new shared compartment is added.
         This new compartment will be the compartment for boundary metabolites, containing all metabolites with exchange
-        reactions. The previous boundary metabolites should then have their exchange reactions converted into transport
+        reactions. The previous boundary metabolites should then have their exchange reactions converted into transfer
         reactions, which transfer the metabolites into the new, shared compartment.
 
         :param model: The model to be changed
         :param old_comp: The ID of the old exchange compartment
         :param inplace: If True, the input model will be changed, else a copy is made
-        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transport reactions)
+        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transfer reactions)
         :return: None if the inplace flag is set, otherwise the model with changed reactions
         """
         if not inplace:
@@ -319,9 +319,9 @@ class SingleOrganismModel:
         for rxn in model.exchanges:
             rxn_string = rxn.id
             if old_comp in rxn_string and old_comp == rxn_string[-len(old_comp):]:
-                # Replace the exchange reaction term with TP_
+                # Replace the exchange reaction term with TF_
                 if "EX_" in rxn.id:
-                    rxn.id = rxn.id.replace("EX_", "TP_")
+                    rxn.id = rxn.id.replace("EX_", "TF_")
                 # Remove the SBO term for exchange reaction
                 if "sbo" in rxn.annotation and "SBO:0000627" in rxn.annotation["sbo"]:
                     rxn.annotation.pop("sbo")
@@ -331,7 +331,7 @@ class SingleOrganismModel:
                     new_met_stoich[model.metabolites.get_by_id(self._exchange_met_name_conversion[met.id])] = -stoich
                 rxn.add_metabolites(new_met_stoich)
                 if "Exchange" in rxn.name:
-                    rxn.name = rxn.name.replace("Exchange", "Transport")
+                    rxn.name = rxn.name.replace("Exchange", "Transfer")
                 rxn.bounds = (-max_flux, max_flux)
 
         model.repair()
@@ -421,16 +421,16 @@ class SingleOrganismModel:
 
         return model
 
-    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True,
+    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transfers=False, inplace=True,
                                  max_flux=1000.):
         """
         Add a new exchange compartment. This will also copy all metabolites in the current external compartment to the
-        exchange compartment, establish transport reactions between the two compartments for all metabolites and add
+        exchange compartment, establish transfer reactions between the two compartments for all metabolites and add
         new exchange reactions for all copied metabolites.
 
         :param model: Model to be changed
         :param exchg_comp_name: Name of the new exchange compartment
-        :param add_missing_transports: If True, add exchange reactions and transport reactions for all metabolites in
+        :param add_missing_transfers: If True, add exchange reactions and transfer reactions for all metabolites in
             the old external compartment that did not have any exchange reactions
         :param inplace: If True, the input model will be changed, else a copy is made
         :param max_flux: Maximum allowed flux
@@ -444,11 +444,11 @@ class SingleOrganismModel:
         old_exc_comp = cobra.medium.find_external_compartment(model)
         # Add metabolites
         self.add_boundary_metabolites_to_exchange_compartment(model, new_comp=exchg_comp_name, inplace=True)
-        # Add transport reactions
-        if add_missing_transports:
+        # Add transfer reactions
+        if add_missing_transfers:
             mets_without_exchg = self.find_metabolites_without_exchange_rxn(model)
             self.add_exchange_reactions_to_metabolites(model, mets_without_exchg, inplace=True)
-        self.convert_exchange_to_transport_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
+        self.convert_exchange_to_transfer_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
         # Add exchange reactions
         self.add_exchange_reactions_to_compartment(model, exchg_comp_name, inplace=True)
 
@@ -574,7 +574,7 @@ class SingleOrganismModel:
         for comp in self.prepared_model.compartments:
             rename[comp] = self.name + "_" + comp
         self.rename_compartment(self.prepared_model, rename)
-        self.add_exchange_compartment(self.prepared_model, add_missing_transports=True, max_flux=max_flux)
+        self.add_exchange_compartment(self.prepared_model, add_missing_transfers=True, max_flux=max_flux)
         self.prefix_metabolite_names(self.prepared_model, self.name + "_",
                                      exclude_compartment=self.shared_compartment_name)
         self.prefix_reaction_names(self.prepared_model, self.name + "_",
@@ -617,6 +617,7 @@ class CommunityModel:
     _dummy_metabolite_scaling_factor = 0.01
     _f_metabolites: list = None
     _f_reactions: list = None
+    _transfer_reactions: list = None
     _model: cobra.Model = None
     _medium: dict = None
     _merge_via_annotation: str = None
@@ -764,6 +765,31 @@ class CommunityModel:
         if self._f_reactions is None:
             self._f_reactions = []
         return self._f_reactions
+
+    @property
+    def transfer_reactions(self):
+        """
+        A list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        return self._transfer_reactions
+
+    @f_reactions.getter
+    def transfer_reactions(self):
+        """
+        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        self._transfer_reactions = self.model.reactions.query(
+            lambda x: "TF_" in x.id
+                      and not ((x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+                      and len(x.compartments) == 3
+                      and self.shared_compartment_name in x.compartments)
+        if self._transfer_reactions is None:
+            self._transfer_reactions = []
+        return self._transfer_reactions
 
     @property
     def medium(self):
@@ -1784,14 +1810,14 @@ class CommunityModel:
         member_names = self.get_member_names()
 
         for exchg_met in exchg_metabolites:
-            # Check flux of transport ("_TP_") reactions to organism
+            # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name}
             for name in member_names:
                 row_dict[name] = 0.
             for rxn in exchg_met.reactions:
-                if "_TP_" not in rxn.id:
+                if "_TF_" not in rxn.id:
                     continue
-                rxn_member = rxn.id.split("_TP_")[0]
+                rxn_member = rxn.id.split("_TF_")[0]
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
@@ -1834,15 +1860,15 @@ class CommunityModel:
         member_names = self.get_member_names()
 
         for exchg_met in exchg_metabolites:
-            # Check flux of transport ("_TP_") reactions to organism
+            # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name, "cross_feeding": False}
             for name in member_names:
                 row_dict[name + "_min_flux"] = 0.
                 row_dict[name + "_max_flux"] = 0.
             for rxn in exchg_met.reactions:
-                if "_TP_" not in rxn.id:
+                if "_TF_" not in rxn.id:
                     continue
-                rxn_member = rxn.id.split("_TP_")[0]
+                rxn_member = rxn.id.split("_TF_")[0]
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
