@@ -662,6 +662,10 @@ class CommunityModel:
                   f"instead.")
             self.max_flux = 1000.
 
+        if len(name) == 0:
+            name = "Community_Model"
+            logger.warning(f"Warning: No name was given for the CommunityModel. Name is set to {name}")
+
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
             logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
