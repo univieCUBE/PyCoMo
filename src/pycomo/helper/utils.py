@@ -191,6 +191,12 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
     :raises KeyError: This error is raised if the biomass metabolite cannot be determined
     :return: The biomass metabolite as COBRApy metabolite
     """
+    if str(model.objective.expression) in ["0.0", "0"]:
+        raise ValueError(f"Model objective is not set.")
+    elif "*" not in str(model.objective.expression):
+        raise ValueError(f"Unknown objective format. Biomass reaction could not be determined."
+                         f"\nObjective: {str(model.objective.expression)}")
+
     objective = str(model.objective.expression).split("*")[1].split(' ')[0]
     biomass_rxn = model.reactions.get_by_id(objective)
     biomass_products = model.reactions.get_by_id(objective).products
