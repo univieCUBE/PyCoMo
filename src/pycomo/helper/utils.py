@@ -188,7 +188,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
     :param expected_biomass_id: The ID of the biomass metabolite if already known or suspected
     :param generate_if_none: If True, a biomass metabolite is created if the objective function does not produce a
         metabolite
-    :raises AssertionError: This error is raised if the biomass metabolite cannot be determined
+    :raises KeyError: This error is raised if the biomass metabolite cannot be determined
     :return: The biomass metabolite as COBRApy metabolite
     """
     objective = str(model.objective.expression).split("*")[1].split(' ')[0]
@@ -202,7 +202,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
             logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         else:
-            raise AssertionError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
+            raise KeyError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
     elif len(biomass_products) == 0:
         # No metabolites produced
         if generate_if_none:
@@ -212,7 +212,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
             model.add_metabolites([biomass_met])
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
-            raise AssertionError(f"No biomass compound could be found in objective\nObjective id: {objective}")
+            raise KeyError(f"No biomass compound could be found in objective\nObjective id: {objective}")
     elif len(biomass_products) == 1:
         biomass_met = biomass_products[0]
     else:
@@ -224,7 +224,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
             model.add_metabolites([biomass_met])
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
-            raise AssertionError(f"Multiple products in objective, biomass metabolite is ambiguous. Please set it "
+            raise KeyError(f"Multiple products in objective, biomass metabolite is ambiguous. Please set it "
                                  f"manually.\nObjective id: {objective}")
     return biomass_met
 
