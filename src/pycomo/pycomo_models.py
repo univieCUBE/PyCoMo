@@ -2109,13 +2109,14 @@ class CommunityModel:
 
     def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
         """
-        Computes the overall maximum growth rate of the community.
+        Computes the overall maximum growth-rate of the community. Changes the model into fixed growth-rate structure,
+        set to the overall maximum growth-rate.
 
         :param minimal_abundance: float indicating the minimal abundance of each member in the community
         :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at
         the maximum growth rate
         :param sensitivity: How many decimal places should be calculated
-        Returns: maximum growth rate
+        :return: maximum growth-rate
         """
         # set minimal abundance of members
         names = self.get_member_names()
@@ -2135,8 +2136,7 @@ class CommunityModel:
         x_is_fba_result = False
 
         while result_difference > 10. ** (-sensitivity):
-            logger.info("New round")
-            logger.info(f"lb: {lb}, ub: {ub}, x: {x}")
+            logger.info(f"New round: lb: {lb}, ub: {ub}, x: {x}")
             # calculate and set mu
             if self.fixed_abundance_flag:
                 self.convert_to_fixed_growth_rate()
