@@ -1826,7 +1826,9 @@ class CommunityModel:
                 row_dict[rxn_member] = 0. if close_to_zero(flux) else flux
             rows.append(row_dict)
 
-        exchg_metabolite_df = pd.DataFrame(rows)
+        exchg_metabolite_df = pd.DataFrame(rows,
+                                           columns=["metabolite_id", "metabolite_name"].extend(list(member_names))
+                                           )
         cross_feeding_metabolites = exchg_metabolite_df.copy()
         cross_feeding_metabolites.drop(columns=["metabolite_id", "metabolite_name"], inplace=True)
         cross_feeding_mask = cross_feeding_metabolites.apply(lambda x: any(x > 0.) and any(x < 0.), axis=1)
@@ -1859,6 +1861,11 @@ class CommunityModel:
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
+        columns = ["metabolite_id", "metabolite_name", "cross_feeding"]
+        for name in member_names:
+            columns.append(name + "_min_flux")
+            columns.append(name + "_max_flux")
+
         for exchg_met in exchg_metabolites:
             # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name, "cross_feeding": False}
@@ -1886,7 +1893,7 @@ class CommunityModel:
             row_dict["cross_feeding"] = interaction
             rows.append(row_dict)
 
-        exchg_metabolite_df = pd.DataFrame(rows)
+        exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
 
         return exchg_metabolite_df
 
@@ -1916,7 +1923,10 @@ class CommunityModel:
                     if row[member + "_max_flux"] > 0.:
                         row_dict["produced_by"].append(member)
             rows.append(row_dict)
-        exchg_metabolite_df = pd.DataFrame(rows)
+
+        columns = ["metabolite_id", "metabolite_name", "cross_feeding", "produced_by", "consumed_by"]
+
+        exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
 
         return exchg_metabolite_df
 

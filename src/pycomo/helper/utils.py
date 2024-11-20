@@ -648,7 +648,7 @@ def find_loops_in_model(model, processes=None):
             if min_flux != 0. or max_flux != 0.:
                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
 
-    loops_df = pd.DataFrame(loops)
+    loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
     return loops_df
 
 
