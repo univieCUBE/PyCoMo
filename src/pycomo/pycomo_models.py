@@ -2161,17 +2161,18 @@ class CommunityModel:
                 # Ensure lower bounds close to zero are rounded to zero.
                 # This also helps with very small negative values.
                 lb_df = (df["min_flux"]).apply(
-                    lambda lb_x: 0. if close_to_zero(lb_x, t=10 ** (-sensitivity - 1)) else lb_x
+                    lambda lb_x: 0. if close_to_zero(lb_x) else lb_x
                 ).apply(
                     lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance
                 )
                 ub_df = (df["max_flux"]).apply(
-                    lambda ub_x: 0. if close_to_zero(ub_x, t=10**(-sensitivity-1)) else ub_x
+                    lambda ub_x: 0. if close_to_zero(ub_x) else ub_x
                 )
                 logger.debug(df)
                 logger.debug(f"lb_df: {lb_df}")
+                logger.debug(f"ub_df: {ub_df}")
                 # dataframe with range of possible abundances
-                r_df = ub_df - lb_df
+                r_df = (ub_df - lb_df).apply(lambda r_x: 0. if close_to_zero(r_x) else r_x)
                 logger.debug(f"R_df: {r_df}")
                 # check that all upper bounds are bigger than the set minimal abundance
                 if not (ub_df >= minimal_abundance).all():
@@ -2187,6 +2188,7 @@ class CommunityModel:
                     raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
                 delta = 1. - sum(lb_df)
+                delta = 0. if close_to_zero(delta) else delta
                 logger.debug(f"Delta: {delta}")
                 # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
                 if delta > 0.:
@@ -2257,6 +2259,9 @@ class CommunityModel:
             new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux": [result], "max_flux": [result]})
             # join fva_result with new row
             result = pd.concat([fva_result, new_row], ignore_index=True)
+            result["min_flux"] = result["min_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+            result["max_flux"] = result["max_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+
         return result
 
 
