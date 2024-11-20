@@ -2128,9 +2128,9 @@ class CommunityModel:
 
         # set starting values
         lb = 0.
-        ub = 1000.
-        x = 500.
-        result_difference = 1.
+        ub = self.max_flux
+        x = (ub - lb) / 2.
+        result_difference = self.max_flux
         result = 0.
         x_is_fba_result = False
 
