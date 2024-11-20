@@ -18,7 +18,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
+handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
@@ -2165,12 +2165,15 @@ class CommunityModel:
                 logger.debug(f"R_df: {r_df}")
                 # check that all upper bounds are bigger than the set minimal abundance
                 if not (ub_df >= minimal_abundance).all():
+                    logger.warning(f"Not all upper bounds are bigger than the set minimal abundance:\n{ub_df}")
                     raise ValueError("Not all upper bounds are bigger than the set minimal abundance")
                 # check that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
                 if not (r_df >= 0.).all():
+                    logger.warning(f"Some possible ranges are less than 0.:\n{r_df}")
                     raise ValueError("Some possible ranges are less than 0.")
                 # check that the solution is not erroneous in the sense that the abundances sum up to 1.
                 if not (sum(ub_df) >= 1. >= sum(lb_df)):
+                    logger.warning(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                     raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
                 delta = 1. - sum(lb_df)
@@ -2197,6 +2200,15 @@ class CommunityModel:
 
                 # check if fba result >= x
                 if fba_result >= x:
+                    # fba result becomes the new x
+                    x = fba_result + 2 * 10 ** -sensitivity
+                    x_is_fba_result = True
+                    # adjust remaining parameters
+                    lb = fba_result
+                    result_difference = fba_result - result
+                    result = fba_result
+                elif close_to_zero(fba_result - x):
+                    logger.debug(f"fba result is only marginally smaller than x: {fba_result} ~= {x}")
                     # fba result becomes the new x
                     x = fba_result + 2 * 10 ** -sensitivity
                     x_is_fba_result = True
