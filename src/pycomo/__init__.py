@@ -5,7 +5,8 @@ __version__ = "0.2.2"
 from pycomo.pycomo_models import (
     SingleOrganismModel,
     CommunityModel,
-    doall
+    doall,
+    configure_logger
 )
 from pycomo.helper.utils import (
     load_named_model,

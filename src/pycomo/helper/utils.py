@@ -9,13 +9,7 @@ from cobra.util.process_pool import ProcessPool
 from cobra.core import Configuration
 import logging
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+logger = logging.getLogger("pycomo")
 logger.info('Utils Logger initialized.')
 
 configuration = Configuration()

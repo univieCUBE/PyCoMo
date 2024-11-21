@@ -7,22 +7,37 @@ flux vector tables."""
 
 # IMPORT SECTION
 from typing import List, Union
-from .helper.utils import *
-from .helper.cli import *
-from .helper.multiprocess import *
 from math import isnan
 import libsbml
 import warnings
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("pycomo")
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
+handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.info('Logger initialized.')
+
+from .helper.utils import *
+from .helper.cli import *
+from .helper.multiprocess import *
+
+
+def configure_logger(level=None, log_file=None):
+    if level is not None:
+        logger.setLevel(level)
+        handler.setLevel(level)
+    if log_file is not None:
+        file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5)
+        if level is not None:
+            file_handler.setLevel(level)
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+    return
 
 
 class SingleOrganismModel:
@@ -300,17 +315,17 @@ class SingleOrganismModel:
         mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - {self.biomass_met})
         return mets_without_exchg
 
-    def convert_exchange_to_transfer_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
+    def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
         """
         When preprocessing the model for merging into a community metabolic model, a new shared compartment is added.
         This new compartment will be the compartment for boundary metabolites, containing all metabolites with exchange
-        reactions. The previous boundary metabolites should then have their exchange reactions converted into transfer
+        reactions. The previous boundary metabolites should then have their exchange reactions converted into transport
         reactions, which transfer the metabolites into the new, shared compartment.
 
         :param model: The model to be changed
         :param old_comp: The ID of the old exchange compartment
         :param inplace: If True, the input model will be changed, else a copy is made
-        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transfer reactions)
+        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transport reactions)
         :return: None if the inplace flag is set, otherwise the model with changed reactions
         """
         if not inplace:
@@ -319,9 +334,9 @@ class SingleOrganismModel:
         for rxn in model.exchanges:
             rxn_string = rxn.id
             if old_comp in rxn_string and old_comp == rxn_string[-len(old_comp):]:
-                # Replace the exchange reaction term with TF_
+                # Replace the exchange reaction term with TP_
                 if "EX_" in rxn.id:
-                    rxn.id = rxn.id.replace("EX_", "TF_")
+                    rxn.id = rxn.id.replace("EX_", "TP_")
                 # Remove the SBO term for exchange reaction
                 if "sbo" in rxn.annotation and "SBO:0000627" in rxn.annotation["sbo"]:
                     rxn.annotation.pop("sbo")
@@ -331,7 +346,7 @@ class SingleOrganismModel:
                     new_met_stoich[model.metabolites.get_by_id(self._exchange_met_name_conversion[met.id])] = -stoich
                 rxn.add_metabolites(new_met_stoich)
                 if "Exchange" in rxn.name:
-                    rxn.name = rxn.name.replace("Exchange", "Transfer")
+                    rxn.name = rxn.name.replace("Exchange", "Transport")
                 rxn.bounds = (-max_flux, max_flux)
 
         model.repair()
@@ -421,16 +436,16 @@ class SingleOrganismModel:
 
         return model
 
-    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transfers=False, inplace=True,
+    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True,
                                  max_flux=1000.):
         """
         Add a new exchange compartment. This will also copy all metabolites in the current external compartment to the
-        exchange compartment, establish transfer reactions between the two compartments for all metabolites and add
+        exchange compartment, establish transport reactions between the two compartments for all metabolites and add
         new exchange reactions for all copied metabolites.
 
         :param model: Model to be changed
         :param exchg_comp_name: Name of the new exchange compartment
-        :param add_missing_transfers: If True, add exchange reactions and transfer reactions for all metabolites in
+        :param add_missing_transports: If True, add exchange reactions and transport reactions for all metabolites in
             the old external compartment that did not have any exchange reactions
         :param inplace: If True, the input model will be changed, else a copy is made
         :param max_flux: Maximum allowed flux
@@ -444,11 +459,11 @@ class SingleOrganismModel:
         old_exc_comp = cobra.medium.find_external_compartment(model)
         # Add metabolites
         self.add_boundary_metabolites_to_exchange_compartment(model, new_comp=exchg_comp_name, inplace=True)
-        # Add transfer reactions
-        if add_missing_transfers:
+        # Add transport reactions
+        if add_missing_transports:
             mets_without_exchg = self.find_metabolites_without_exchange_rxn(model)
             self.add_exchange_reactions_to_metabolites(model, mets_without_exchg, inplace=True)
-        self.convert_exchange_to_transfer_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
+        self.convert_exchange_to_transport_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
         # Add exchange reactions
         self.add_exchange_reactions_to_compartment(model, exchg_comp_name, inplace=True)
 
@@ -574,7 +589,7 @@ class SingleOrganismModel:
         for comp in self.prepared_model.compartments:
             rename[comp] = self.name + "_" + comp
         self.rename_compartment(self.prepared_model, rename)
-        self.add_exchange_compartment(self.prepared_model, add_missing_transfers=True, max_flux=max_flux)
+        self.add_exchange_compartment(self.prepared_model, add_missing_transports=True, max_flux=max_flux)
         self.prefix_metabolite_names(self.prepared_model, self.name + "_",
                                      exclude_compartment=self.shared_compartment_name)
         self.prefix_reaction_names(self.prepared_model, self.name + "_",
@@ -617,7 +632,6 @@ class CommunityModel:
     _dummy_metabolite_scaling_factor = 0.01
     _f_metabolites: list = None
     _f_reactions: list = None
-    _transfer_reactions: list = None
     _model: cobra.Model = None
     _medium: dict = None
     _merge_via_annotation: str = None
@@ -662,10 +676,6 @@ class CommunityModel:
             logger.warning(f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
                   f"instead.")
             self.max_flux = 1000.
-
-        if len(name) == 0:
-            name = "Community_Model"
-            logger.warning(f"Warning: No name was given for the CommunityModel. Name is set to {name}")
 
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
@@ -765,31 +775,6 @@ class CommunityModel:
         if self._f_reactions is None:
             self._f_reactions = []
         return self._f_reactions
-
-    @property
-    def transfer_reactions(self):
-        """
-        A list of f_reactions (dummy reactions controlling the reaction bounds)
-
-        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
-        """
-        return self._transfer_reactions
-
-    @f_reactions.getter
-    def transfer_reactions(self):
-        """
-        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
-
-        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
-        """
-        self._transfer_reactions = self.model.reactions.query(
-            lambda x: "TF_" in x.id
-                      and not ((x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
-                      and len(x.compartments) == 3
-                      and self.shared_compartment_name in x.compartments)
-        if self._transfer_reactions is None:
-            self._transfer_reactions = []
-        return self._transfer_reactions
 
     @property
     def medium(self):
@@ -1064,7 +1049,7 @@ class CommunityModel:
         # create additional reactions for each biomass reaction of a suborganism
         for member, met in biomass_mets.items():
             rxn = merged_model.reactions.get_by_id(f"{member}_to_community_biomass")
-            replace_metabolite_stoichiometry(rxn, {met: -1, biomass_met: 1})
+            rxn.add_metabolites({met: -1, biomass_met: 1}, combine=False)
         # set mu_c for the community, default = 1
         self.apply_fixed_growth_rate(self.mu_c, merged_model)
 
@@ -1214,18 +1199,18 @@ class CommunityModel:
         if lower_bound != 0:
             coefficient = -self.max_flux if lower_bound < -self.max_flux else lower_bound
             fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
-            replace_metabolite_stoichiometry(reaction, {met_lb: self._dummy_metabolite_scaling_factor})
+            reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor}, combine=False)
         else:
-            replace_metabolite_stoichiometry(reaction, {met_lb: 0})
+            reaction.add_metabolites({met_lb: 0}, combine=False)
             fraction_reaction_mets[met_lb] = 0
 
         if upper_bound != 0:
             coefficient = self.max_flux if upper_bound > self.max_flux else upper_bound
             fraction_reaction_mets[met_ub] = coefficient * self._dummy_metabolite_scaling_factor
-            replace_metabolite_stoichiometry(reaction, {met_ub: -self._dummy_metabolite_scaling_factor})
+            reaction.add_metabolites({met_ub: -self._dummy_metabolite_scaling_factor}, combine=False)
         else:
             fraction_reaction_mets[met_ub] = 0
-            replace_metabolite_stoichiometry(reaction, {met_ub: 0})
+            reaction.add_metabolites({met_ub: 0}, combine=False)
 
         # Relax reaction bounds
         if lower_bound < 0:
@@ -1238,7 +1223,7 @@ class CommunityModel:
             reaction.upper_bound = self.max_flux
 
         # Add fraction metabolites to the fraction reaction
-        replace_metabolite_stoichiometry(fraction_reaction, fraction_reaction_mets)
+        fraction_reaction.add_metabolites(fraction_reaction_mets, combine=False)
 
         # Add sink reactions for fraction mets
         self.add_sink_reactions_to_metabolites(model, metabolites_needing_sink_reactions)
@@ -1307,11 +1292,14 @@ class CommunityModel:
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
                 fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: flux})
+                fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
                 self.model.add_metabolites(fraction_met)
-                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: flux})
+                if fraction_met in fraction_rxn.metabolites:
+                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+                else:
+                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=True)
 
         model.repair()
 
@@ -1350,12 +1338,12 @@ class CommunityModel:
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
                 fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: 0})
+                fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
                 if fraction_met in fraction_rxn.metabolites:
                     self.model.add_metabolites(fraction_met)
-                    replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: 0})
+                    fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
         # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
         model.reactions.get_by_id("abundance_reaction").bounds = (0., self.max_flux)
@@ -1429,7 +1417,7 @@ class CommunityModel:
             abd_rxn_mets[f_bio_met] = fraction
 
         abd_rxn = model.reactions.get_by_id("abundance_reaction")
-        replace_metabolite_stoichiometry(abd_rxn, abd_rxn_mets)
+        abd_rxn.add_metabolites(abd_rxn_mets, combine=False)
 
         self._abundance_dict = abd_dict
 
@@ -1517,20 +1505,20 @@ class CommunityModel:
                     if "_lb" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.lower_bound = -coeff / self._dummy_metabolite_scaling_factor
-                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
-                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
+                        rxn.add_metabolites({metabolite: 0}, combine=False)
+                        reaction.add_metabolites({metabolite: 0}, combine=False)
                         metabolite.remove_from_model(True)
                     elif "_ub" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.upper_bound = coeff / self._dummy_metabolite_scaling_factor
-                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
-                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
+                        rxn.add_metabolites({metabolite: 0}, combine=False)
+                        reaction.add_metabolites({metabolite: 0}, combine=False)
                         metabolite.remove_from_model(True)
                     elif "_f_biomass_met" in metabolite.id:
                         rxn = model.reactions.get_by_id(
                             metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
-                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
-                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
+                        rxn.add_metabolites({metabolite: 0}, combine=False)
+                        reaction.add_metabolites({metabolite: 0}, combine=False)
                         metabolite.remove_from_model(True)
 
         for reaction in reactions_to_remove:
@@ -1552,18 +1540,12 @@ class CommunityModel:
         medium_dict = read_medium_from_file(file_path, comp=f"_{self.shared_compartment_name}")
         self.medium = medium_dict
 
-    def apply_medium(self, medium=None):
+    def apply_medium(self):
         """
         Applies the medium that is specified in the medium attribute to the community metabolic model
 
-        :param medium: Optional. A dictionary with exchange reaction IDs as keys and the maximum
-            flux of the respective metabolite as value. If none is given, the medium in self.medium is applied.
         :return: The updated model
         """
-
-        if medium is not None:
-            self.medium = medium
-
         test_if_medium_exists = self.medium
         medium_model = self.model
         # Exclude metabolites from the medium that are not part of the model
@@ -1678,7 +1660,7 @@ class CommunityModel:
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
                         f_bio_mets[member_name] = fraction_met
-                        replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
+                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 if loopless:
                     if verbose:
@@ -1719,7 +1701,7 @@ class CommunityModel:
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
                         f_bio_mets[member_name] = fraction_met
-                        replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
+                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
 
                 if loopless:
                     if verbose:
@@ -1810,14 +1792,14 @@ class CommunityModel:
         member_names = self.get_member_names()
 
         for exchg_met in exchg_metabolites:
-            # Check flux of transfer ("_TF_") reactions to organism
+            # Check flux of transport ("_TP_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name}
             for name in member_names:
                 row_dict[name] = 0.
             for rxn in exchg_met.reactions:
-                if "_TF_" not in rxn.id:
+                if "_TP_" not in rxn.id:
                     continue
-                rxn_member = rxn.id.split("_TF_")[0]
+                rxn_member = rxn.id.split("_TP_")[0]
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
@@ -1826,9 +1808,7 @@ class CommunityModel:
                 row_dict[rxn_member] = 0. if close_to_zero(flux) else flux
             rows.append(row_dict)
 
-        exchg_metabolite_df = pd.DataFrame(rows,
-                                           columns=["metabolite_id", "metabolite_name"].extend(list(member_names))
-                                           )
+        exchg_metabolite_df = pd.DataFrame(rows)
         cross_feeding_metabolites = exchg_metabolite_df.copy()
         cross_feeding_metabolites.drop(columns=["metabolite_id", "metabolite_name"], inplace=True)
         cross_feeding_mask = cross_feeding_metabolites.apply(lambda x: any(x > 0.) and any(x < 0.), axis=1)
@@ -1861,21 +1841,16 @@ class CommunityModel:
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
-        columns = ["metabolite_id", "metabolite_name", "cross_feeding"]
-        for name in member_names:
-            columns.append(name + "_min_flux")
-            columns.append(name + "_max_flux")
-
         for exchg_met in exchg_metabolites:
-            # Check flux of transfer ("_TF_") reactions to organism
+            # Check flux of transport ("_TP_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name, "cross_feeding": False}
             for name in member_names:
                 row_dict[name + "_min_flux"] = 0.
                 row_dict[name + "_max_flux"] = 0.
             for rxn in exchg_met.reactions:
-                if "_TF_" not in rxn.id:
+                if "_TP_" not in rxn.id:
                     continue
-                rxn_member = rxn.id.split("_TF_")[0]
+                rxn_member = rxn.id.split("_TP_")[0]
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
@@ -1893,7 +1868,7 @@ class CommunityModel:
             row_dict["cross_feeding"] = interaction
             rows.append(row_dict)
 
-        exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
+        exchg_metabolite_df = pd.DataFrame(rows)
 
         return exchg_metabolite_df
 
@@ -1923,10 +1898,7 @@ class CommunityModel:
                     if row[member + "_max_flux"] > 0.:
                         row_dict["produced_by"].append(member)
             rows.append(row_dict)
-
-        columns = ["metabolite_id", "metabolite_name", "cross_feeding", "produced_by", "consumed_by"]
-
-        exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
+        exchg_metabolite_df = pd.DataFrame(rows)
 
         return exchg_metabolite_df
 
@@ -2109,14 +2081,13 @@ class CommunityModel:
 
     def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
         """
-        Computes the overall maximum growth-rate of the community. Changes the model into fixed growth-rate structure,
-        set to the overall maximum growth-rate.
+        Computes the overall maximum growth rate of the community.
 
         :param minimal_abundance: float indicating the minimal abundance of each member in the community
         :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at
         the maximum growth rate
         :param sensitivity: How many decimal places should be calculated
-        :return: maximum growth-rate
+        Returns: maximum growth rate
         """
         # set minimal abundance of members
         names = self.get_member_names()
@@ -2129,14 +2100,15 @@ class CommunityModel:
 
         # set starting values
         lb = 0.
-        ub = self.max_flux
-        x = (ub - lb) / 2.
-        result_difference = self.max_flux
+        ub = 1000.
+        x = 500.
+        result_difference = 1.
         result = 0.
         x_is_fba_result = False
 
         while result_difference > 10. ** (-sensitivity):
-            logger.info(f"New round: lb: {lb}, ub: {ub}, x: {x}")
+            logger.info("New round")
+            logger.info(f"lb: {lb}, ub: {ub}, x: {x}")
             # calculate and set mu
             if self.fixed_abundance_flag:
                 self.convert_to_fixed_growth_rate()
@@ -2156,39 +2128,26 @@ class CommunityModel:
                     df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
                 # fix abundances to a point within the feasible composition space of the current mu
                 # get name of the member for each row in the fva df
-                member_id = [string.replace("_fraction_reaction", "") for string in df["reaction_id"]]
+                member_id = [string[0:-18] for string in df["reaction_id"]]
                 # dataframes with min and max flux values of fraction reactions
-                # Ensure lower bounds close to zero are rounded to zero.
-                # This also helps with very small negative values.
-                lb_df = (df["min_flux"]).apply(
-                    lambda lb_x: 0. if close_to_zero(lb_x) else lb_x
-                ).apply(
-                    lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance
-                )
-                ub_df = (df["max_flux"]).apply(
-                    lambda ub_x: 0. if close_to_zero(ub_x) else ub_x
-                )
+                lb_df = (df["min_flux"]).apply(lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance)
+                ub_df = (df["max_flux"])
                 logger.debug(df)
                 logger.debug(f"lb_df: {lb_df}")
-                logger.debug(f"ub_df: {ub_df}")
                 # dataframe with range of possible abundances
-                r_df = (ub_df - lb_df).apply(lambda r_x: 0. if close_to_zero(r_x) else r_x)
+                r_df = ub_df - lb_df
                 logger.debug(f"R_df: {r_df}")
                 # check that all upper bounds are bigger than the set minimal abundance
                 if not (ub_df >= minimal_abundance).all():
-                    logger.warning(f"Not all upper bounds are bigger than the set minimal abundance:\n{ub_df}")
                     raise ValueError("Not all upper bounds are bigger than the set minimal abundance")
                 # check that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
                 if not (r_df >= 0.).all():
-                    logger.warning(f"Some possible ranges are less than 0.:\n{r_df}")
                     raise ValueError("Some possible ranges are less than 0.")
                 # check that the solution is not erroneous in the sense that the abundances sum up to 1.
                 if not (sum(ub_df) >= 1. >= sum(lb_df)):
-                    logger.warning(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                     raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
                 delta = 1. - sum(lb_df)
-                delta = 0. if close_to_zero(delta) else delta
                 logger.debug(f"Delta: {delta}")
                 # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
                 if delta > 0.:
@@ -2212,15 +2171,6 @@ class CommunityModel:
 
                 # check if fba result >= x
                 if fba_result >= x:
-                    # fba result becomes the new x
-                    x = fba_result + 2 * 10 ** -sensitivity
-                    x_is_fba_result = True
-                    # adjust remaining parameters
-                    lb = fba_result
-                    result_difference = fba_result - result
-                    result = fba_result
-                elif close_to_zero(fba_result - x):
-                    logger.debug(f"fba result is only marginally smaller than x: {fba_result} ~= {x}")
                     # fba result becomes the new x
                     x = fba_result + 2 * 10 ** -sensitivity
                     x_is_fba_result = True
@@ -2259,9 +2209,6 @@ class CommunityModel:
             new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux": [result], "max_flux": [result]})
             # join fva_result with new row
             result = pd.concat([fva_result, new_row], ignore_index=True)
-            result["min_flux"] = result["min_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
-            result["max_flux"] = result["max_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
-
         return result
 
 

@@ -14,13 +14,7 @@ from cobra.util.process_pool import ProcessPool
 if TYPE_CHECKING:
     from cobra import Model
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+logger = logging.getLogger("pycomo")
 logger.info('Multiprocess Logger initialized.')
 
 configuration = Configuration()
