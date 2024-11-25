@@ -13,7 +13,8 @@ import warnings
 import logging
 
 logger = logging.getLogger("pycomo")
-logger.setLevel(logging.DEBUG)
+log_level = logging.DEBUG
+logger.setLevel(log_level)
 handler = logging.StreamHandler()
 handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -27,16 +28,34 @@ from .helper.multiprocess import *
 
 
 def configure_logger(level=None, log_file=None):
+    global log_level
+
+    log_level_dict = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR
+    }
+
     if level is not None:
-        logger.setLevel(level)
-        handler.setLevel(level)
+        if isinstance(level, str):
+            if level.lower() in log_level_dict.keys():
+                log_level = log_level_dict[level.lower()]
+            else:
+                logger.error(f"Error: Unknown log level string {level}. Use one of {log_level_dict.keys()}")
+        else:
+            log_level = level
+        logger.setLevel(log_level)
+        handler.setLevel(log_level)
+        logger.info(f"Log level set to {level}")
+
     if log_file is not None:
         file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5)
-        if level is not None:
-            file_handler.setLevel(level)
+        file_handler.setLevel(log_level)
         file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
+        logger.info(f"Log file {log_file} added")
     return
 
 
@@ -2198,11 +2217,16 @@ class CommunityModel:
                     logger.warning(f"Some possible ranges are less than 0.:\n{r_df}")
                     raise ValueError("Some possible ranges are less than 0.")
                 # check that the solution is not erroneous in the sense that the abundances sum up to 1.
-                if not (sum(ub_df) >= 1. >= sum(lb_df)):
+                sum_ub_df = sum(ub_df)
+                sum_ub_df = 1. if close_to_zero(1. - sum_ub_df) else sum_ub_df
+                sum_lb_df = sum(lb_df)
+                sum_lb_df = 0. if close_to_zero(sum_lb_df) else sum_lb_df
+                sum_lb_df = 1. if close_to_zero(1. - sum_lb_df) else sum_lb_df
+                if not (sum_ub_df >= 1. >= sum_lb_df):
                     logger.warning(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                     raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
-                delta = 1. - sum(lb_df)
+                delta = 1. - sum_lb_df
                 delta = 0. if close_to_zero(delta) else delta
                 logger.debug(f"Delta: {delta}")
                 # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
