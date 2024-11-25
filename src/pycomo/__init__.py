@@ -1,11 +1,13 @@
 __author__ = 'Michael Predl, Marianne Mießkes'
-__version__ = "0.2.2"
+__version__ = "0.2.6"
 
 
 from pycomo.pycomo_models import (
     SingleOrganismModel,
     CommunityModel,
     doall,
+)
+from pycomo.helper.logger import (
     configure_logger
 )
 from pycomo.helper.utils import (
