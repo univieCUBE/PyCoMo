@@ -161,14 +161,16 @@ def load_named_models_from_dir(path, file_format="sbml"):
     return named_models
 
 
-def close_to_zero(num, t=10**-10):
+def close_to_zero(num, t=None):
     """
-    Checks whether a number is within threshold t of 0.
+    Checks whether a number is within threshold t of 0. Default threshold t is the solver tolerance.
 
     :param num: The number to be checked
     :param t: The threshold around 0
     :return: True if the number is within threshold t of 0, otherwise False
     """
+    if t is None:
+        t = cobra.Configuration().tolerance
     return -t < num < t
 
 
