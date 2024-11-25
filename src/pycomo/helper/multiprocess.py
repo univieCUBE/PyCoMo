@@ -7,6 +7,7 @@ from optlang.symbolics import Zero
 
 import time
 from .utils import get_f_reactions
+from .logger import configure_logger, get_logger_conf
 
 from cobra.core import Configuration
 from cobra.util.process_pool import ProcessPool
@@ -20,7 +21,7 @@ logger.info('Multiprocess Logger initialized.')
 configuration = Configuration()
 
 
-def _init_fva_worker(model: "Model", ko_candidate_ids: list) -> None:
+def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf) -> None:
     """
     Initialize a global model object and corresponding variables for multiprocessing.
 
@@ -36,6 +37,7 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list) -> None:
     _f_rxn_set = set(get_f_reactions(_model))
     _exchg_rxn_set = set(_model.exchanges)
     _ll_candidates = set(_model.reactions.get_by_any(ko_candidate_ids))
+    configure_logger(logger_conf[0], logger_conf[1])
     logger.debug(f"_init_worker finished in {time.time() - s_time}")
 
 
@@ -132,6 +134,7 @@ def _loopless_fva_step(rxn_id):
     :return rxn_id, max_flux, min_flux: The input reaction ID, maximum flux and minimum flux (as calculated by loopless
     FVA)
     """
+    logger.debug(f"Starting loopless FVA step for rxn {rxn_id}")
     rxn = _model.reactions.get_by_id(rxn_id)
     perform_loopless_on_rxn = True
     if rxn not in _ll_candidates:
@@ -169,6 +172,7 @@ def _loopless_fva_step(rxn_id):
     else:
         logger.debug(f"{rxn.id} max flux is infeasible")
         max_flux = 0.
+    logger.debug(f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
     return rxn_id, max_flux, min_flux
 
 
@@ -199,26 +203,38 @@ def loopless_fva(pycomo_model,
 
     if verbose:
         logger.info("Starting loopless FVA")
+    else:
+        logger.debug("Starting loopless FVA")
     if verbose:
         logger.info("Preparing model")
+    else:
+        logger.debug("Preparing model")
 
     reaction_ids = [r.id for r in reactions]
 
     with pycomo_model.model:  # Revert changes to the model after fva
         if verbose:
             logger.info("Model prepared")
+        else:
+            logger.debug("Model prepared")
         if use_loop_reactions_for_ko:
             if verbose:
                 logger.info("Searching for reactions that are part of loops")
+            else:
+                logger.debug("Searching for reactions that are part of loops")
             ko_candidate_ids = list(pycomo_model.get_loops(processes=processes)["reaction"])
             if verbose:
                 logger.info(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
+            else:
+                logger.debug(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
         elif ko_candidate_ids is None:
             ko_candidate_ids = [r.id for r in pycomo_model.model.reactions]
 
         if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
             if verbose:
                 logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
+            else:
+                logger.debug(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
             fraction_of_optimum = float(fraction_of_optimum)
             if not (0. <= fraction_of_optimum <= 1.):
                 logger.warning(f"fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
@@ -269,7 +285,7 @@ def loopless_fva(pycomo_model,
             with ProcessPool(
                     processes,
                     initializer=_init_fva_worker,
-                    initargs=(pycomo_model.model, ko_candidate_ids),
+                    initargs=(pycomo_model.model, ko_candidate_ids, get_logger_conf()),
             ) as pool:
                 for rxn_id, max_flux, min_flux in pool.imap_unordered(
                         _loopless_fva_step, reaction_ids, chunksize=chunk_size
@@ -280,7 +296,7 @@ def loopless_fva(pycomo_model,
                     result.at[rxn_id, "maximum"] = max_flux
                     result.at[rxn_id, "minimum"] = min_flux
         else:
-            _init_fva_worker(pycomo_model.model, ko_candidate_ids)
+            _init_fva_worker(pycomo_model.model, ko_candidate_ids, get_logger_conf())
             for rxn_id, max_flux, min_flux in map(_loopless_fva_step, reaction_ids):
                 processed_rxns += 1
                 if processed_rxns % 10 == 0:
