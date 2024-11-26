@@ -12,7 +12,7 @@ import libsbml
 import warnings
 import logging
 
-from.helper.logger import *
+from .helper.logger import *
 from .helper.utils import *
 from .helper.cli import *
 from .helper.multiprocess import *
@@ -64,7 +64,8 @@ class SingleOrganismModel:
         self._original_name = name
         self.name = make_string_sbml_id_compatible(name, remove_ascii_escapes=True)
         if name != self.name:
-            logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
+            logger.warning(
+                f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         self.biomass_met_id = biomass_met_id
         self._name_via_annotation = name_via_annotation
         self.shared_compartment_name = shared_compartment_name
@@ -654,8 +655,9 @@ class CommunityModel:
         if max_flux > 0.:
             self.max_flux = max_flux
         else:
-            logger.warning(f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
-                  f"instead.")
+            logger.warning(
+                f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
+                f"instead.")
             self.max_flux = 1000.
 
         if len(name) == 0:
@@ -664,7 +666,8 @@ class CommunityModel:
 
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
-            logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
+            logger.warning(
+                f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         if merge_via_annotation is not None:
             self._merge_via_annotation = merge_via_annotation
             for model in self.member_models:
@@ -805,7 +808,7 @@ class CommunityModel:
         """
         if self._medium is None:
             raise ValueError("Error: No medium set for this community model.\nPlease set the medium with "
-                                 ".load_medium_from_file('/path/to/medium_file.csv')")
+                             ".load_medium_from_file('/path/to/medium_file.csv')")
         return self._medium
 
     @medium.setter
@@ -1024,15 +1027,16 @@ class CommunityModel:
                                                                                              merged_model)
                 for met_id in unbalanced_metabolites:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    logger.warning(f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
-                          f"Please manually curate this metabolite for a mass and charge balanced model!")
+                    logger.warning(
+                        f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
+                        f"Please manually curate this metabolite for a mass and charge balanced model!")
                 no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
                                                                                                   merged_model)
                 for met_id in no_annotation_overlap:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
                     logger.warning(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
-                          f"Please make sure that the metabolite with this ID is indeed representing the same substance"
-                          f" in all models!")
+                                   f"Please make sure that the metabolite with this ID is indeed representing the same substance"
+                                   f" in all models!")
 
                 biomass_met_id = model.biomass_met.id
 
@@ -1379,8 +1383,9 @@ class CommunityModel:
         (check fixed_abundance_flag).
         """
         if not self.fixed_abundance_flag:
-            logger.error("Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
-                  "Convert the model to fixed abundance structure first.")
+            logger.error(
+                "Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
+                "Convert the model to fixed abundance structure first.")
             return
 
         # Check if organism names are in the model
@@ -1391,11 +1396,13 @@ class CommunityModel:
             raise ValueError(err_msg)
 
         # Check that abundances sum to 1
+        logger.debug("Checking if the sum of abundances is 1.")
         if not np.isclose([sum(abd_dict.values())], [1.]):
             logger.warning(f"Warning: Abundances do not sum up to 1. Correction will be applied")
             if sum(abd_dict.values()) == 0.:
                 logger.error(f"Error: The sum of abundances is 0")
                 raise ValueError
+            logger.debug("Applying abundance correction")
             correction_factor = 1 / sum(abd_dict.values())
             for name, abundance in abd_dict.items():
                 new_abundance = abundance * correction_factor
@@ -1406,15 +1413,18 @@ class CommunityModel:
             if np.isnan(list(abd_dict.values())).any():
                 raise ValueError(f"Abundances contain NaN values: {abd_dict}")
 
+        logger.debug("Extending abundances to include all organisms")
         # Extend abundances to include all organisms of model
         for name in self.get_member_names():
             if name not in abd_dict.keys():
                 abd_dict[name] = 0.
 
         # Apply the abundance as ratios of f_biomass metabolites
+        logger.debug(f"Applying abundances to model. Final abundances: {abd_dict}")
         model = self.model
         abd_rxn_mets = {}
         for member_name, fraction in abd_dict.items():
+            logger.debug(f"Setting abundance for {member_name}")
             try:
                 f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
             except KeyError:
@@ -1423,7 +1433,9 @@ class CommunityModel:
             f_rxn.bounds = (0., fraction)
             abd_rxn_mets[f_bio_met] = fraction
 
+        logger.debug("Getting abundance reaction")
         abd_rxn = model.reactions.get_by_id("abundance_reaction")
+        logger.debug("Setting abundance reaction")
         replace_metabolite_stoichiometry(abd_rxn, abd_rxn_mets)
 
         self._abundance_dict = abd_dict
@@ -1640,30 +1652,48 @@ class CommunityModel:
         :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
+        logger.debug(f"Starting run FVA with parameters:\n\t"
+                     f"fraction_of_optimum: {fraction_of_optimum}\n\t"
+                     f"composition_agnostic: {composition_agnostic}\n\t"
+                     f"loopless: {loopless}\n\t"
+                     f"fva_mu_c: {fva_mu_c}\n\t"
+                     f"only_exchange_reactions: {only_exchange_reactions}\n\t"
+                     f"reactions: {reactions}\n\t"
+                     f"verbose: {verbose}\n\t"
+                     f"processes: {processes}\n\t")
         model = self.model
 
         if fva_mu_c is None and composition_agnostic:
+            logger.debug(f"Setting fva_mu_c to 0 and fraction_of_optimum to 0")
             fva_mu_c = 0.
             fraction_of_optimum = 0.
         elif fva_mu_c is not None:
+            logger.debug("Setting fraction_of_optimum to 1")
             fraction_of_optimum = 1.
 
         if only_exchange_reactions:
             if verbose:
                 logger.info(f"Setting reactions to be analysed to exchange reactions only")
+            else:
+                logger.debug("Setting reactions to be analysed to exchange reactions only")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
             if verbose:
                 logger.info(f"Setting reactions to be analysed to all non-fraction-reactions")
+            else:
+                logger.debug("Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
         if fva_mu_c is not None:
+            logger.debug(f"fva_mu_c is not None: {fva_mu_c}")
             f_bio_mets = {}
             if self.fixed_growth_rate_flag:
+                logger.debug(f"Model is in fixed growth rate")
                 mu_c = self.mu_c
                 self.apply_fixed_growth_rate(fva_mu_c)
                 if composition_agnostic:
+                    logger.debug("Prepare model for composition agnostic run")
                     # Allow flux through the biomass reaction
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
                     # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
@@ -1678,6 +1708,8 @@ class CommunityModel:
                 if loopless:
                     if verbose:
                         logger.info(f"Running loopless FVA")
+                    else:
+                        logger.debug("Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
                                                     use_loop_reactions_for_ko=True,
@@ -1686,12 +1718,15 @@ class CommunityModel:
                 else:
                     if verbose:
                         logger.info(f"Running FVA")
+                    else:
+                        logger.debug("Running FVA")
                     solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
                                                                                             reactions,
                                                                                             fraction_of_optimum=fraction_of_optimum,
                                                                                             loopless=False,
                                                                                             processes=processes)
 
+                logger.debug("FVA finished!")
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1741,9 +1776,12 @@ class CommunityModel:
 
                 self.convert_to_fixed_abundance()
         else:
+            logger.debug(f"fva_mu_c is None: {fva_mu_c}")
             if loopless:
                 if verbose:
                     logger.info(f"Running loopless FVA")
+                else:
+                    logger.debug(f"Running loopless FVA")
                 solution_df = self.loopless_fva(reactions,
                                                 fraction_of_optimum=fraction_of_optimum,
                                                 use_loop_reactions_for_ko=True,
@@ -1752,11 +1790,14 @@ class CommunityModel:
             else:
                 if verbose:
                     logger.info(f"Running FVA")
+                else:
+                    logger.debug(f"Running FVA")
                 solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
                                                                                         reactions,
                                                                                         fraction_of_optimum=fraction_of_optimum,
                                                                                         loopless=False,
                                                                                         processes=processes)
+            logger.debug("FVA finished")
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
@@ -1993,8 +2034,9 @@ class CommunityModel:
             reactions_in_loops = self.get_loops()
             num_loop_reactions = len(reactions_in_loops)
         else:
-            logger.info(f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
-                  f"would take some time. If needed, please run manually via .get_loops()")
+            logger.info(
+                f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
+                f"would take some time. If needed, please run manually via .get_loops()")
         report_dict = {"community_name": self.name,
                        "model_structure": model_structure,
                        "num_metabolites": num_metabolites,
@@ -2135,21 +2177,31 @@ class CommunityModel:
             logger.info(f"New round: lb: {lb}, ub: {ub}, x: {x}")
             # calculate and set mu
             if self.fixed_abundance_flag:
+                logger.debug("Converting to fixed growth-rate")
                 self.convert_to_fixed_growth_rate()
+            logger.debug(f"Setting fixed growth-rate to {x}")
             self.apply_fixed_growth_rate(x)
 
             # sometimes, through computational mistakes, a lower bound ends up smaller than the upper bound
             # in that case, the lower bound is the maximum growth rate
+            logger.debug(f"Checking results if {lb} > {ub}")
             if lb > ub:
+                logger.debug(f"Result is lb {lb}")
                 result = lb
                 break
 
             # check if mu is feasible
+            logger.debug("Check if mu is feasible")
             try:
+                # run fba
+                logger.debug("Running FBA to see if infeasible")
+                self.model.slim_optimize()
                 # run fva
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
+                    logger.debug("Running FVA")
                     df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
+                    logger.debug(f"FVA completed:\n{df}")
                 # fix abundances to a point within the feasible composition space of the current mu
                 # get name of the member for each row in the fva df
                 member_id = [string.replace("_fraction_reaction", "") for string in df["reaction_id"]]
@@ -2204,14 +2256,22 @@ class CommunityModel:
                     ab_df = lb_df
                 logger.debug(f"ab_df: {ab_df}")
                 # create an abundance dictionary
+                # Safeguard against abundances very close to 0. or 1
+                abd_t = max(cobra.Configuration().tolerance * 100, 10 ** (-sensitivity))
+                ab_df = ab_df.apply(lambda abd: 0. if close_to_zero(abd, t=abd_t) else (
+                    1. if close_to_zero(1. - abd, t=abd_t) else abd))
+                logger.debug(f"Corrected abundances: {ab_df}")
                 abundance_dict = dict(zip(member_id, ab_df))
                 # set abundance
+                logger.debug(f"Setting abundance to {abundance_dict}")
                 self.convert_to_fixed_abundance()
                 self.apply_fixed_abundance(abundance_dict)
 
                 # conduct fba with this composition
+                logger.debug(f"Running FBA")
                 fba_result = self.model.slim_optimize()
                 if isnan(fba_result):
+                    logger.debug("FBA result is NaN")
                     raise cobra.exceptions.Infeasible("FBA result is NaN!")
                 logger.debug(f"fba results: {fba_result}")
 
@@ -2249,6 +2309,7 @@ class CommunityModel:
 
             if ub - lb < 10 ** (-sensitivity):
                 result_difference = 0.
+            logger.debug(f"Loop end with result_difference {result_difference}")
 
         # truncate result
         result = np.floor((result * 10 ** sensitivity)) / 10 ** sensitivity
@@ -2267,6 +2328,7 @@ class CommunityModel:
             result["min_flux"] = result["min_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
             result["max_flux"] = result["max_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
 
+        logger.info(f"Maximum growth-rate is {result}")
         return result
 
 
@@ -2354,8 +2416,8 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
                     tmp_abundance[name_conversion[name]] = fraction
             except KeyError as e:
                 err_msg = f"Error: Some names in the abundances are not part of the model." \
-                        f"\n\tAbundances: {abundance.keys()}" \
-                        f"\n\tOrganisms in model: {com_model_obj.get_member_names()}"
+                          f"\n\tAbundances: {abundance.keys()}" \
+                          f"\n\tOrganisms in model: {com_model_obj.get_member_names()}"
                 raise KeyError(err_msg)
             com_model_obj.convert_to_fixed_abundance()
             com_model_obj.apply_fixed_abundance(tmp_abundance)
@@ -2364,7 +2426,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     else:
         if fixed_growth_rate < 0.:
             logger.error(f"Error: Specified growth rate is negative ({fixed_growth_rate}). PyCoMo will continue with a "
-                  f"growth rate set to 0.")
+                         f"growth rate set to 0.")
             fixed_growth_rate = 0.
         com_model_obj.convert_to_fixed_growth_rate()
         com_model_obj.apply_fixed_growth_rate(fixed_growth_rate)
