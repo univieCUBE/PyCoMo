@@ -664,6 +664,7 @@ class CommunityModel:
     _f_metabolites: list = None
     _f_reactions: list = None
     _transfer_reactions: list = None
+    _transport_reactions: list = None
     _model: cobra.Model = None
     _medium: dict = None
     _merge_via_annotation: str = None
@@ -815,6 +816,28 @@ class CommunityModel:
         return self._f_reactions
 
     @property
+    def transport_reactions(self):
+        """
+        A list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        return self._transfer_reactions
+
+    @transport_reactions.getter
+    def transport_reactions(self):
+        """
+        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        self._transport_reactions = self.model.reactions.query(
+            lambda x: self.is_transporter(x))
+        if self._transport_reactions is None:
+            self._transport_reactions = []
+        return self._transport_reactions
+
+    @property
     def transfer_reactions(self):
         """
         A list of f_reactions (dummy reactions controlling the reaction bounds)
@@ -823,17 +846,20 @@ class CommunityModel:
         """
         return self._transfer_reactions
 
-    @f_reactions.getter
+    @transfer_reactions.getter
     def transfer_reactions(self):
         """
         Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
 
         :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
         """
+        f_reactions = self.f_reactions
+        transport_rxns = self.transport_reactions
         self._transfer_reactions = self.model.reactions.query(
-            lambda x: "TF_" in x.id
-                      and not ((x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+            lambda x: x not in f_reactions
+                      and x not in transport_rxns
                       and len(x.compartments) == 3
+                      and "fraction_reaction" in x.compartments
                       and self.shared_compartment_name in x.compartments)
         if self._transfer_reactions is None:
             self._transfer_reactions = []
@@ -877,6 +903,25 @@ class CommunityModel:
         if not all([isinstance(value, float) for value in medium_dict.values()]):
             raise TypeError("Medium values must be floats!")
         self._medium = medium_dict
+
+    def is_transporter(self, rxn):
+        if rxn in self.f_reactions:
+            # Fraction reactions are not transporters
+            return False
+        met_comps = [met.compartment for met in rxn.metabolites.keys() if met.compartment != "fraction_reaction"]
+        if self.shared_compartment_name in met_comps:
+            # Transporters operate within a single organism.
+            # Exchange of metabolites between the shared compartment and the members is handled by transfer reactions.
+            return False
+        if len(set(met_comps)) < 2:
+            # Transporters need to operate within at least 2 compartments
+            return False
+        for n in self.get_member_names():
+            # Transporters need to operate within compartments of
+            # the same member (excluding the fraction_reaction compartment)
+            if n in rxn.id and all([n in m for m in met_comps]):
+                return True
+        return False
 
     def summary(self, suppress_f_metabolites=True):
         """
@@ -1896,15 +1941,20 @@ class CommunityModel:
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
+        transfer_reactions = self.transfer_reactions
         for exchg_met in exchg_metabolites:
             # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name}
             for name in member_names:
                 row_dict[name] = 0.
             for rxn in exchg_met.reactions:
-                if "_TF_" not in rxn.id:
+                if rxn not in transfer_reactions:
                     continue
-                rxn_member = rxn.id.split("_TF_")[0]
+                rxn_member = ""
+                for member in self.get_member_names():
+                    if len(member) <= len(rxn.id) and member in rxn.id[:len(member)]:
+                        rxn_member = member
+                        break
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
@@ -1960,6 +2010,7 @@ class CommunityModel:
             columns.append(name + "_min_flux")
             columns.append(name + "_max_flux")
 
+        transfer_reactions = self.transfer_reactions
         for exchg_met in exchg_metabolites:
             # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name, "cross_feeding": False}
@@ -1967,9 +2018,13 @@ class CommunityModel:
                 row_dict[name + "_min_flux"] = 0.
                 row_dict[name + "_max_flux"] = 0.
             for rxn in exchg_met.reactions:
-                if "_TF_" not in rxn.id:
+                if rxn not in transfer_reactions:
                     continue
-                rxn_member = rxn.id.split("_TF_")[0]
+                rxn_member = ""
+                for member in self.get_member_names():
+                    if len(member) <= len(rxn.id) and member in rxn.id[:len(member)]:
+                        rxn_member = member
+                        break
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
