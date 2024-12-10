@@ -86,6 +86,10 @@ def create_arg_parser():
     pg_output.add_argument('--loopless', type=bool, default=True,
                            help="run FVA with loop correction (on by default)")
 
+    pg_output.add_argument('--max-growth-rate', action='store_true',
+                           help="calculate the maximum growth-rate of the community, as well as the community "
+                                "composition reaching it. Results are stored in a csv file.")
+
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
@@ -151,5 +155,9 @@ def check_args(args):
     args.sbml_output_file = None
     if args.save_sbml:
         args.sbml_output_file = f"{args.name}.xml"
+
+    args.max_growth_rate_file = None
+    if args.max_growth_rate:
+        args.max_growth_rate_file = f"{args.name}_max_growth_rate.csv"
 
     return args

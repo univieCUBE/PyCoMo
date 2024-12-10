@@ -2382,11 +2382,26 @@ class CommunityModel:
         return result
 
 
-def doall(model_folder="", models=None, com_model=None, out_dir="", community_name="community_model",
-          fixed_growth_rate=None, abundance="equal", medium=None,
-          fba_solution_file=None, fva_solution_file=None, fva_solution_threshold=0.9, fba_interaction_file=None,
-          fva_interaction_file=None, composition_agnostic=False, sbml_output_file=None, return_as_cobra_model=False,
-          merge_via_annotation=None, loopless=True, num_cores=1):
+def doall(model_folder="",
+          models=None,
+          com_model=None,
+          out_dir="",
+          community_name="community_model",
+          fixed_growth_rate=None,
+          abundance="equal",
+          medium=None,
+          fba_solution_file=None,
+          fva_solution_file=None,
+          fva_solution_threshold=0.9,
+          fba_interaction_file=None,
+          fva_interaction_file=None,
+          composition_agnostic=False,
+          max_growth_rate_file=None,
+          sbml_output_file=None,
+          return_as_cobra_model=False,
+          merge_via_annotation=None,
+          loopless=True,
+          num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
     generation of community metabolic models, their analyses and can save the results of analyses as well as the model
@@ -2409,6 +2424,8 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     :param fva_interaction_file: Run FVA to calculate cross-feeding interactions and save the solution to this file
     :param composition_agnostic: Run FVA with relaxed constraints (composition agnostic)
     :param sbml_output_file: If a filename is given, save the community metabolic model as SBML file
+    :param max_growth_rate_file: If a filename is given, calculate the maximum community growth-rate, including the
+        feasible community composition.
     :param return_as_cobra_model: If true, returns the community metabolic model as COBRApy model object, otherwise as
         PyCoMo CommunityModel object
     :param merge_via_annotation: The database to be used for matching boundary metabolites when merging into a
@@ -2526,6 +2543,13 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
 
+    if max_growth_rate_file is not None:
+        try:
+            growth_df = com_model_obj.max_growth_rate(sensitivity=4, return_abundances=True)
+            growth_df.to_csv(os.path.join(out_dir, max_growth_rate_file))
+        except cobra.exceptions.Infeasible:
+            logger.warning(f"WARNING: FBA of community is infeasible. No maximum growth-rate file was generated.")
+
     if return_as_cobra_model:
         # Retrieve community model
         return com_model_obj.model
@@ -2546,39 +2570,60 @@ def main():
         args.abundance = read_abundance_from_file(args.abundance)
 
     if args.is_community:
-        doall(com_model=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+        doall(com_model=args.input[0],
+              community_name=args.name,
+              out_dir=args.output_dir,
+              abundance=args.abundance,
               medium=args.medium,
-              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fba_solution_file=args.fba_solution_file,
+              fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fva_flux,
+              fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
-              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file,
+              return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
-              loopless=args.loopless)
+              loopless=args.loopless,
+              max_growth_rate_file=args.max_growth_rate_file)
 
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
-        doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+        doall(model_folder=args.input[0],
+              community_name=args.name,
+              out_dir=args.output_dir,
+              abundance=args.abundance,
               medium=args.medium,
-              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fba_solution_file=args.fba_solution_file,
+              fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fva_flux,
+              fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
-              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file,
+              return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
-              loopless=args.loopless)
+              loopless=args.loopless,
+              max_growth_rate_file=args.max_growth_rate_file)
     else:
-        doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+        doall(models=args.input,
+              community_name=args.name,
+              out_dir=args.output_dir,
+              abundance=args.abundance,
               medium=args.medium,
-              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fba_solution_file=args.fba_solution_file,
+              fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fva_flux,
+              fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
-              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file,
+              return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
-              loopless=args.loopless)
+              loopless=args.loopless,
+              max_growth_rate_file=args.max_growth_rate_file)
 
     logger.info("All done!")
     sys.exit(0)
