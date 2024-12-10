@@ -245,7 +245,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
             raise KeyError(f"Multiple products in objective, biomass metabolite is ambiguous. Please set it "
-                                 f"manually.\nObjective id: {objective}")
+                           f"manually.\nObjective id: {objective}")
     logger.debug(f"Final identified biomass rxn: {biomass_rxn}: {biomass_rxn.metabolites}")
     if return_biomass_rxn:
         return biomass_met, biomass_rxn

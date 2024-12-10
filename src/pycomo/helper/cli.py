@@ -1,11 +1,30 @@
 import os
 import sys
 import argparse
+import warnings
 
 __description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
 __version__ = "0.2.6"
+
+
+def parse_fva_flux(value):
+    if value is None:  # Used as a flag (e.g., --fva-flux)
+        return True
+    try:
+        # Try to convert the value to a float (e.g., --fva-flux 0.5)
+        float_value = float(value)
+        # Issue a deprecation warning
+        warnings.warn(
+            "Providing a float value for '--fva-flux' is deprecated and will be removed in a future version. "
+            "Please use it as a flag instead and set the fraction of the optimum with '--fraction-of-optimum'",
+            DeprecationWarning,
+        )
+        return float_value
+    except ValueError:
+        # Raise an error if the value is invalid
+        raise argparse.ArgumentTypeError(f"Invalid value for --fva-flux: {value}")
 
 
 def create_arg_parser():
@@ -66,9 +85,9 @@ def create_arg_parser():
     pg_output.add_argument('--fba-flux', action='store_true',
                            help="run FBA on the community model and store the flux vector in a file")
 
-    pg_output.add_argument('--fva-flux', type=float,
+    pg_output.add_argument('--fva-flux', nargs='?', type=parse_fva_flux, const=True, default=False,
                            help="run FVA on the exchange metabolites of the community model and store the flux vector "
-                                "in a file. Set the threshold of the objective that needs to be achieved.")
+                                "in a file.")
 
     pg_output.add_argument('--fba-interaction', action='store_true',
                            help="run FBA on the community model and store the flux of exchange metabolites and "
@@ -85,6 +104,10 @@ def create_arg_parser():
 
     pg_output.add_argument('--loopless', type=bool, default=True,
                            help="run FVA with loop correction (on by default)")
+
+    pg_output.add_argument('--fraction-of-optimum', type=float,
+                           help="set the fraction of optimum that needs to be achieved. Values need to be between 0 "
+                                "and 1. Examples: 0 -> 0% of optimum, 0.9 -> 90% of optimum, 1 -> 100% of optimum.")
 
     pg_output.add_argument('--max-growth-rate', action='store_true',
                            help="calculate the maximum growth-rate of the community, as well as the community "
@@ -113,9 +136,9 @@ def check_args(args):
     elif not all([os.path.exists(arg_path) for arg_path in args.input]):
         raise ValueError("Not all input files / directories exist.")
 
-    if args.fva_flux is not None:
-        if not 0. <= args.fva_flux <= 1.:
-            raise ValueError("The fva-flux argument needs to be between 0. and 1. (inclusive).")
+    if args.fraction_of_optimum is not None:
+        if not 0. <= args.fraction_of_optimum <= 1.:
+            raise ValueError("The fraction-of-optimum argument needs to be between 0. and 1. (inclusive).")
 
     if args.num_cores is not None:
         if not 0 < args.num_cores:
@@ -141,7 +164,7 @@ def check_args(args):
         args.fba_solution_file = f"{args.name}_fba_flux.csv"
 
     args.fva_solution_file = None
-    if args.fva_flux is not None:
+    if args.fva_flux:
         args.fva_solution_file = f"{args.name}_fva_flux.csv"
 
     args.fba_interaction_file = None

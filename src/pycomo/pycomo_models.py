@@ -1879,11 +1879,12 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def cross_feeding_metabolites_from_fba(self):
+    def cross_feeding_metabolites_from_fba(self, return_flux_vector=False):
         """
         Run flux balance analysis and convert the solution flux vector into a table of metabolites, including the
         solution flux for the exchange reaction of each metabolite for every community member.
 
+        :param return_flux_vector: If True, return the flux vector from FBA output as well
         :return: A dataframe of the solution flux for the exchange reaction of each metabolite for every community
             member
         """
@@ -1919,10 +1920,16 @@ class CommunityModel:
         cross_feeding_metabolites.drop(columns=["metabolite_id", "metabolite_name"], inplace=True)
         cross_feeding_mask = cross_feeding_metabolites.apply(lambda x: any(x > 0.) and any(x < 0.), axis=1)
         exchg_metabolite_df["cross_feeding"] = cross_feeding_mask
+        if return_flux_vector:
+            return exchg_metabolite_df, solution_df
         return exchg_metabolite_df
 
     def cross_feeding_metabolites_from_fva(self, fraction_of_optimum=0.,
-                                           composition_agnostic=False, fva_mu_c=None, loopless=True, processes=None):
+                                           composition_agnostic=False,
+                                           fva_mu_c=None,
+                                           loopless=True,
+                                           processes=None,
+                                           return_flux_vector=False):
         """
         Run flux variability analysis and convert the solution flux ranges into a table of metabolites, including the
         solution flux ranges for the exchange reaction of each metabolite for every community member.
@@ -1933,6 +1940,7 @@ class CommunityModel:
         :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
         :param loopless: Run loopless FVA
         :param processes: The number of processes to use
+        :param return_flux_vector: If True, return the flux vector from FVA output as well
         :return: A dataframe of the solution flux range for the exchange reaction of each metabolite for every community
             member
         """
@@ -1980,7 +1988,8 @@ class CommunityModel:
             rows.append(row_dict)
 
         exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
-
+        if return_flux_vector:
+            return exchg_metabolite_df, solution_df
         return exchg_metabolite_df
 
     def format_exchg_rxns(self, exchg_metabolite_df):
@@ -2020,8 +2029,10 @@ class CommunityModel:
                                        fba=False,
                                        composition_agnostic=True,
                                        fva_mu_c=None,
+                                       fraction_of_optimum=0.,
                                        loopless=True,
-                                       processes=None):
+                                       processes=None,
+                                       return_flux_vector=False):
         """
         Calculates all potentially exchanged metabolites between the community members. This can be done via flux
         balance analysis or flux variability analysis.
@@ -2030,24 +2041,32 @@ class CommunityModel:
         :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
             solutions without balanced growth, i.e. different growth rate of community members.
         :param fva_mu_c: Set a temporary community growth rate for the analysis (only FVA).
+        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached (only FVA)
         :param loopless: Run loopless FVA
         :param processes: The number of processes to use (only FVA)
+        :param return_flux_vector: If True, return the flux vector from FBA/FVA output as well
         :return: A dataframe of which metabolites are cross-fed, taken up or secreted by each community member
         """
-        # TODO: give the option to return the flux vector
-        if fba:
-            exchange_df = self.cross_feeding_metabolites_from_fba()
-        elif composition_agnostic:
-            exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=None,
-                                                                  composition_agnostic=True,
-                                                                  loopless=loopless,
-                                                                  processes=processes)
-        else:
-            exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=fva_mu_c,
-                                                                  composition_agnostic=False,
-                                                                  loopless=loopless,
-                                                                  processes=processes)
 
+        if fba:
+            exchange_df, flux_vector = self.cross_feeding_metabolites_from_fba(return_flux_vector=True)
+        elif composition_agnostic:
+            exchange_df, flux_vector = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1.,
+                                                                               fva_mu_c=None,
+                                                                               composition_agnostic=True,
+                                                                               loopless=loopless,
+                                                                               processes=processes,
+                                                                               return_flux_vector=True)
+        else:
+            exchange_df, flux_vector = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=fraction_of_optimum,
+                                                                               fva_mu_c=fva_mu_c,
+                                                                               composition_agnostic=False,
+                                                                               loopless=loopless,
+                                                                               processes=processes,
+                                                                               return_flux_vector=True)
+
+        if return_flux_vector:
+            return self.format_exchg_rxns(exchange_df), flux_vector
         return self.format_exchg_rxns(exchange_df)
 
     def report(self, verbose=True, max_reactions=5000):
@@ -2506,42 +2525,58 @@ def doall(model_folder="",
     if sbml_output_file is not None:
         com_model_obj.save(os.path.join(out_dir, sbml_output_file))
 
-    if fba_solution_file is not None:
-        try:
-            com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_file))
-        except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
-
-    if fva_solution_file is not None:
-        try:
-            com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_file),
-                                                   fraction_of_optimum=fva_solution_threshold,
-                                                   processes=num_cores,
-                                                   composition_agnostic=composition_agnostic,
-                                                   loopless=loopless)
-        except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
-
+    fva_flux_vector = None
     if fva_interaction_file is not None:
         try:
-            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False,
-                                                                          composition_agnostic=composition_agnostic,
-                                                                          loopless=loopless,
-                                                                          processes=num_cores)
+            interaction_df, fva_flux_vector = com_model_obj.potential_metabolite_exchanges(
+                fba=False,
+                composition_agnostic=composition_agnostic,
+                fraction_of_optimum=fva_solution_threshold,
+                loopless=loopless,
+                processes=num_cores,
+                return_flux_vector=True)
             logger.info(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_file)}")
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
 
+    if fva_solution_file is not None:
+        try:
+            if fva_flux_vector is not None:
+                # Use flux vector from interactions
+                fva_flux_vector.to_csv(os.path.join(out_dir, fva_solution_file), sep="\t", header=True,
+                                       index=False, float_format='%f')
+            else:
+                com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_file),
+                                                       fraction_of_optimum=fva_solution_threshold,
+                                                       processes=num_cores,
+                                                       composition_agnostic=composition_agnostic,
+                                                       loopless=loopless)
+        except cobra.exceptions.Infeasible:
+            logger.warning(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
+
+    fba_flux_vector = None
     if fba_interaction_file is not None:
         try:
-            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=True)
+            interaction_df, fba_flux_vector = com_model_obj.potential_metabolite_exchanges(fba=True,
+                                                                                           return_flux_vector=True)
             logger.info(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_file)}")
             interaction_df.to_csv(os.path.join(out_dir, fba_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
             logger.warning(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
+
+    if fba_solution_file is not None:
+        try:
+            if fba_flux_vector is not None:
+                # Use flux vector from interactions
+                fva_flux_vector.to_csv(os.path.join(out_dir, fba_solution_file), sep="\t", header=True,
+                                       index=False, float_format='%f')
+            else:
+                com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_file))
+        except cobra.exceptions.Infeasible:
+            logger.warning(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
 
     if max_growth_rate_file is not None:
         try:
@@ -2577,7 +2612,7 @@ def main():
               medium=args.medium,
               fba_solution_file=args.fba_solution_file,
               fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux,
+              fva_solution_threshold=args.fraction_of_optimum,
               fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
               sbml_output_file=args.sbml_output_file,
@@ -2596,7 +2631,7 @@ def main():
               medium=args.medium,
               fba_solution_file=args.fba_solution_file,
               fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux,
+              fva_solution_threshold=args.fraction_of_optimum,
               fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
               sbml_output_file=args.sbml_output_file,
@@ -2614,7 +2649,7 @@ def main():
               medium=args.medium,
               fba_solution_file=args.fba_solution_file,
               fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux,
+              fva_solution_threshold=args.fraction_of_optimum,
               fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
               sbml_output_file=args.sbml_output_file,
