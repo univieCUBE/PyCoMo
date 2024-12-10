@@ -660,6 +660,7 @@ class CommunityModel:
     fixed_growth_rate_flag: bool = False
     max_flux: float = 1000.
     shared_compartment_name: str = None
+    no_annotation_overlap: list = None
     _dummy_metabolite_scaling_factor = 0.01
     _f_metabolites: list = None
     _f_reactions: list = None
@@ -688,6 +689,7 @@ class CommunityModel:
         self.member_models = models
         self.mu_c = mu_c
         self.shared_compartment_name = shared_compartment_name
+        self.no_annotation_overlap = None
 
         if models is not None:
             model_names = [model.name for model in self.member_models]
@@ -764,6 +766,7 @@ class CommunityModel:
         :return: The community metabolic model (COBRApy model object)
         """
         if self._model is None:
+            self.no_annotation_overlap = []
             logger.info(f"No community model generated yet. Generating now:")
             self.generate_community_model()
             logger.info(f"Generated community model.")
@@ -1127,11 +1130,7 @@ class CommunityModel:
                         f"Please manually curate this metabolite for a mass and charge balanced model!")
                 no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
                                                                                                   merged_model)
-                for met_id in no_annotation_overlap:
-                    met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    logger.warning(f"No annotation overlap found for matching metabolite {met_base_name}. "
-                                   f"Please make sure that the metabolite with this ID is indeed representing the same substance"
-                                   f" in all models!")
+                self.no_annotation_overlap.extend(no_annotation_overlap)
 
                 biomass_met_id = model.biomass_met.id
 
@@ -1147,6 +1146,12 @@ class CommunityModel:
                 with temporary_logger_filter("cobra.core.model", regex_filter_cobra):
                     merged_model.merge(extended_model)
                 biomass_mets[model.name] = merged_model.metabolites.get_by_id(biomass_met_id)
+
+        if len(self.no_annotation_overlap) > 0:
+            logger.warning(f"No annotation overlap found for matching several metabolites "
+                           f"({len(self.no_annotation_overlap)}). Please make sure that the matched metabolites "
+                           f"are indeed representing the same substance in all models! The list of metabolites"
+                           f"without annotation overlap can be accessed via 'model.no_annotation_overlap'")
 
         self.fixed_growth_rate_flag = True
         self.fixed_abundance_flag = False
