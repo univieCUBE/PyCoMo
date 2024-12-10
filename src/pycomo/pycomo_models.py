@@ -1186,7 +1186,7 @@ class CommunityModel:
 
         if not self.is_mass_balanced():
             logger.warning(
-                "WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are "
+                "Not all reactions in the model are mass and charge balanced. To check which reactions are "
                 "imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
 
         return merged_model
@@ -2602,7 +2602,7 @@ def doall(model_folder="",
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
+            logger.warning(f"FVA of community is infeasible. No FVA interaction file was generated.")
 
     if fva_solution_file is not None:
         try:
@@ -2617,7 +2617,7 @@ def doall(model_folder="",
                                                        composition_agnostic=composition_agnostic,
                                                        loopless=loopless)
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
+            logger.warning(f"FVA of community is infeasible. No FVA flux vector file was generated.")
 
     fba_flux_vector = None
     if fba_interaction_file is not None:
@@ -2628,7 +2628,7 @@ def doall(model_folder="",
             interaction_df.to_csv(os.path.join(out_dir, fba_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
+            logger.warning(f"FBA of community is infeasible. No FBA interaction file was generated.")
 
     if fba_solution_file is not None:
         try:
@@ -2639,14 +2639,14 @@ def doall(model_folder="",
             else:
                 com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_file))
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
+            logger.warning(f"FBA of community is infeasible. No FBA flux vector file was generated.")
 
     if max_growth_rate_file is not None:
         try:
             growth_df = com_model_obj.max_growth_rate(sensitivity=4, return_abundances=True)
             growth_df.to_csv(os.path.join(out_dir, max_growth_rate_file))
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FBA of community is infeasible. No maximum growth-rate file was generated.")
+            logger.warning(f"FBA of community is infeasible. No maximum growth-rate file was generated.")
 
     if return_as_cobra_model:
         # Retrieve community model
