@@ -689,7 +689,7 @@ class CommunityModel:
         self.member_models = models
         self.mu_c = mu_c
         self.shared_compartment_name = shared_compartment_name
-        self.no_annotation_overlap = None
+        self.no_annotation_overlap = []
 
         if models is not None:
             model_names = [model.name for model in self.member_models]
