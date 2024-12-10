@@ -1123,13 +1123,13 @@ class CommunityModel:
                 for met_id in unbalanced_metabolites:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
                     logger.warning(
-                        f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
+                        f"Matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
                         f"Please manually curate this metabolite for a mass and charge balanced model!")
                 no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
                                                                                                   merged_model)
                 for met_id in no_annotation_overlap:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    logger.warning(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
+                    logger.warning(f"No annotation overlap found for matching metabolite {met_base_name}. "
                                    f"Please make sure that the metabolite with this ID is indeed representing the same substance"
                                    f" in all models!")
 
@@ -1142,7 +1142,10 @@ class CommunityModel:
                 extended_model.add_reactions([rxn])
                 self.create_fraction_reaction(extended_model, member_name=model.name)
 
-                merged_model.merge(extended_model)
+                regex_filter_cobra = RegexFilter(r"Ignoring")
+
+                with temporary_logger_filter("cobra.core.model", regex_filter_cobra):
+                    merged_model.merge(extended_model)
                 biomass_mets[model.name] = merged_model.metabolites.get_by_id(biomass_met_id)
 
         self.fixed_growth_rate_flag = True

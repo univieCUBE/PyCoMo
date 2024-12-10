@@ -1,8 +1,11 @@
 import warnings
 import logging
 from logging.handlers import RotatingFileHandler
+from contextlib import contextmanager
+import re
 
 logger = logging.getLogger("pycomo")
+logging.captureWarnings(True)
 log_level = logging.DEBUG
 logger.setLevel(log_level)
 handler = logging.StreamHandler()
@@ -12,6 +15,35 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.info('Logger initialized.')
 log_file_name = None
+
+
+class RegexFilter(logging.Filter):
+    def __init__(self, pattern):
+        super().__init__()
+        self.pattern = re.compile(pattern)
+
+    def filter(self, record):
+        # Suppress log messages matching the regex pattern
+        return not self.pattern.search(record.getMessage())
+
+
+# Create a context manager to temporarily add a filter to a logger
+@contextmanager
+def temporary_logger_filter(logger_name, filter_instance):
+    tmp_logger = logging.getLogger(logger_name)
+    tmp_logger.addFilter(filter_instance)
+    try:
+        yield  # Code inside the context block will execute here
+    finally:
+        tmp_logger.removeFilter(filter_instance)  # Remove the filter afterward
+
+
+# Suppress warnings about the medium compartment not identifiable by name and
+# Adding exchange reaction on sbml import (both are working as intended).
+regex_filter_medium = RegexFilter(r"Could not identify an external compartment by name ")
+regex_filter_sbml = RegexFilter(r"Adding exchange reaction ")
+logging.getLogger("cobra.medium.boundary_types").addFilter(regex_filter_medium)
+logging.getLogger("cobra.io.sbml").addFilter(regex_filter_sbml)
 
 
 def configure_logger(level=None, log_file=None):
