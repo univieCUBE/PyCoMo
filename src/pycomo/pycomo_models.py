@@ -2599,6 +2599,10 @@ def main():
     parser = create_arg_parser()
     args = parser.parse_args()
     args = check_args(args)
+    if args.log_file is not None:
+        configure_logger(log_file=args.log_file)
+    if args.log_level is not None:
+        configure_logger(level=args.log_level)
     logger.info(args)
     if args.abundance is not None and args.abundance != "equal":
         # Retrieve the abundance from file

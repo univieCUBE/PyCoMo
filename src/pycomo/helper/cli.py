@@ -113,6 +113,13 @@ def create_arg_parser():
                            help="calculate the maximum growth-rate of the community, as well as the community "
                                 "composition reaching it. Results are stored in a csv file.")
 
+    pg_output.add_argument('--log-file', nargs='?', type=str, const="pycomo.log", default=None,
+                           help="set a log file for PyCoMo, located in the output directory (see -o / --output-dir. "
+                                "If used as flag, the file is called 'pycomo.log'.")
+
+    pg_output.add_argument('--log-level', type=str,
+                           help="set log level. Use one of the following values: error, warning, info, debug")
+
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
@@ -182,5 +189,15 @@ def check_args(args):
     args.max_growth_rate_file = None
     if args.max_growth_rate:
         args.max_growth_rate_file = f"{args.name}_max_growth_rate.csv"
+
+    if args.log_file is not None:
+        args.log_file = os.path.join(args.output_dir, args.log_file)
+
+    if args.log_level is not None:
+        if args.log_level.lower() not in ["debug", "info", "warning", "error"]:
+            warnings.warn(
+                f"Unknown log-level {args.log_level}. Please use one of the following: error, warning, info, debug"
+            )
+            args.log_level = None
 
     return args
