@@ -174,7 +174,8 @@ def close_to_zero(num, t=None):
     return -t < num < t
 
 
-def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_id="", generate_if_none=False):
+def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_id="", generate_if_none=False,
+                               return_biomass_rxn=False):
     """
     Finds the biomass metabolite in a model. A biomass metabolite can also be created, if the biomass reaction
     (objective) does not produce any metabolites.
@@ -184,6 +185,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
     :param expected_biomass_id: The ID of the biomass metabolite if already known or suspected
     :param generate_if_none: If True, a biomass metabolite is created if the objective function does not produce a
         metabolite
+    :param return_biomass_rxn: If True, return the identified biomass reaction as well
     :raises KeyError: This error is raised if the biomass metabolite cannot be determined
     :return: The biomass metabolite as COBRApy metabolite
     """
@@ -195,14 +197,30 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
 
     objective = str(model.objective.expression).split("*")[1].split(' ')[0]
     biomass_rxn = model.reactions.get_by_id(objective)
+    logger.info(f"Identified biomass reaction from objective: {biomass_rxn.id}")
     biomass_products = model.reactions.get_by_id(objective).products
     biomass_met = None
     if len(expected_biomass_id) > 0:
         if expected_biomass_id in [met.id for met in biomass_products]:
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         elif expected_biomass_id in [met.id for met in model.metabolites]:
-            logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
+            logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective "
+                           f"function.")
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
+            biomass_producing_reactions = []
+            for rxn in biomass_met.reactions:
+                if biomass_met in rxn.products:
+                    biomass_producing_reactions.append(rxn)
+            if len(biomass_producing_reactions) == 1:
+                biomass_rxn = biomass_producing_reactions[0]
+                logger.info(f"Identified biomass reaction expected biomass metabolite: {biomass_rxn.id}")
+            elif len(biomass_producing_reactions) == 0:
+                logger.warning(f"No reaction in the model is producing the expected biomass metabolite "
+                               f"{expected_biomass_id}!")
+                biomass_rxn = None
+            elif len(biomass_producing_reactions) > 1:
+                logger.warning(f"Multiple reactions produce the expected biomass metabolite {expected_biomass_id}")
+                biomass_rxn = None
         else:
             raise KeyError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
     elif len(biomass_products) == 0:
@@ -228,6 +246,9 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
         else:
             raise KeyError(f"Multiple products in objective, biomass metabolite is ambiguous. Please set it "
                                  f"manually.\nObjective id: {objective}")
+    logger.debug(f"Final identified biomass rxn: {biomass_rxn}: {biomass_rxn.metabolites}")
+    if return_biomass_rxn:
+        return biomass_met, biomass_rxn
     return biomass_met
 
 

@@ -8,6 +8,8 @@ flux vector tables."""
 # IMPORT SECTION
 from typing import List, Union
 from math import isnan
+
+import cobra
 import libsbml
 import warnings
 import logging
@@ -32,6 +34,8 @@ class SingleOrganismModel:
     :type name: str
     :param biomass_met: The biomass metabolite of the model
     :type biomass_met: class:`cobra.metabolite`
+    :param biomass_reaction: The biomass reaction of the model
+    :type biomass_reaction: class:`cobra.reaction`
     :param biomass_met_id: The ID of the biomass metabolite
     :type biomass_met_id: str
     :param prepared_model: The preprocessed model for merging
@@ -43,6 +47,7 @@ class SingleOrganismModel:
     name: str
     _original_name: str  # Used to make a conversion table at any point
     biomass_met: cobra.Metabolite = None
+    biomass_reaction: cobra.Reaction = None
     biomass_met_id: str = None
     prepared_model: cobra.Model = None
     shared_compartment_name = None
@@ -294,6 +299,7 @@ class SingleOrganismModel:
         comp_mets = model.metabolites.query(lambda x: x.compartment == exchg_comp)
         exchg_mets = [list(rxn.metabolites)[0] for rxn in model.exchanges]
         mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - {self.biomass_met})
+        logger.debug(f"Metabolites in exchange compartment without exchange reactions: {mets_without_exchg}")
         return mets_without_exchg
 
     def convert_exchange_to_transfer_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
@@ -531,11 +537,47 @@ class SingleOrganismModel:
         :return: None
         """
         for reaction in self.biomass_met.reactions:
+            if reaction == self.biomass_rxn:
+                continue
             if reaction in model.exchanges:
                 reaction.remove_from_model()
             elif remove_all_consuming_rxns and self.biomass_met in reaction.reactants:
                 reaction.remove_from_model(remove_orphans=True)
         return
+
+    def handle_boundary_biomass_reaction(self):
+        """
+        Checks if identified biomass reaction is a boundary reaction. If so, replace the boundary prefix from the
+        reaction ID (EX, SK, DM). Also removes the SBO term associated with the boundary reaction. In case only a
+        single reactant is present (which is expected), the reactant is moved from the boundary compartment into the
+        'bio' compartment, to avoid further boundary reactions being added to it.
+        """
+        if self.biomass_rxn is None:
+            logger.info("No biomass reaction identified, skipping handling of boundary biomass reactions")
+            return
+        if self.model.reactions.get_by_id(self.biomass_rxn.id) in self.model.boundary:
+            logger.info(f"Biomass reaction {self.biomass_rxn.id} is a boundary reaction.")
+            # Remove the SBO term for exchange reaction
+            if "sbo" in self.biomass_rxn.annotation and "SBO:0000627" in self.biomass_rxn.annotation["sbo"]:
+                self.biomass_rxn.annotation.pop("sbo")
+            biomass_reactants = self.biomass_rxn.reactants
+            if len(biomass_reactants) == 1:
+                # Move biomass metabolite out of boundary compartment
+                logger.info(f"Moving reactant {biomass_reactants[0]} out of the boundary compartment into compartment "
+                            f"'bio', to avoid further boundary reactions being added to it.")
+                biomass_reactants[0].compartment = "bio"
+            elif len(biomass_reactants) == 0:
+                logger.warning(f"Biomass reaction {self.biomass_rxn.id} has no reactants!")
+            elif len(biomass_reactants) > 1:
+                logger.warning(f"Biomass reaction {self.biomass_rxn.id} is a boundary reaction with more than 1 "
+                               f"reactant!")
+            # Rename biomass reaction ID
+            if "EX_" in self.biomass_rxn.id:
+                self.biomass_rxn.id = self.biomass_rxn.id.replace("EX_", "bio_")
+            elif "SK_" in self.biomass_rxn.id:
+                self.biomass_rxn.id = self.biomass_rxn.id.replace("SK_", "bio_")
+            elif "DM_" in self.biomass_rxn.id:
+                self.biomass_rxn.id = self.biomass_rxn.id.replace("DM_", "bio_")
 
     def prepare_for_merging(self, shared_compartment_name=None, max_flux=1000.):
         """
@@ -556,8 +598,16 @@ class SingleOrganismModel:
         if shared_compartment_name is not None:
             self.shared_compartment_name = shared_compartment_name
         self.prepared_model = self.model.copy()
-        self.biomass_met = get_model_biomass_compound(self.prepared_model, self.shared_compartment_name,
-                                                      generate_if_none=True)
+        biomass_met, biomass_rxn = get_model_biomass_compound(self.prepared_model,
+                                                              self.shared_compartment_name,
+                                                              generate_if_none=True,
+                                                              return_biomass_rxn=True)
+        self.biomass_met = biomass_met
+        self.biomass_rxn = biomass_rxn
+
+        # Handle case where the biomass reaction is a boundary reaction
+        self.handle_boundary_biomass_reaction()
+
         self.remove_biomass_exchange_rxn(self.prepared_model)
 
         # Remove ascii escape characters from sbml ids, as they are not compatible
