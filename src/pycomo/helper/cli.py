@@ -107,7 +107,7 @@ def create_arg_parser():
 
     pg_output.add_argument('--fraction-of-optimum', type=float,
                            help="set the fraction of optimum that needs to be achieved. Values need to be between 0 "
-                                "and 1. Examples: 0 -> 0% of optimum, 0.9 -> 90% of optimum, 1 -> 100% of optimum.")
+                                "and 1. Examples: 0 -> 0%% of optimum, 0.9 -> 90%% of optimum, 1 -> 100%% of optimum.")
 
     pg_output.add_argument('--max-growth-rate', action='store_true',
                            help="calculate the maximum growth-rate of the community, as well as the community "
