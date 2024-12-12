@@ -57,7 +57,7 @@ def create_arg_parser():
     pg_linearisation = pg_com_model.add_mutually_exclusive_group()
 
     pg_linearisation.add_argument('--growth-rate', type=float,
-                                  help="set abundances to be equal for all community members")
+                                  help="set a fixed growth-rate for the community")
 
     pg_linearisation.add_argument('--equal-abd', action='store_true',
                                   help="set abundances to be equal for all community members")
