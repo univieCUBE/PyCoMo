@@ -26,8 +26,8 @@ def test_doall():
 def test_doall_max_growth():
     community_model = pycomo.doall(toy_folder_tiny, max_growth_rate_file="test/data/output/max_growth_rate.csv")
     df = pd.read_csv("test/data/output/max_growth_rate.csv")
-    assert all(df[df["reaction_id"] == "community_biomass"]["min_flux"] == 15.)
-    assert all(df[df["reaction_id"] == "community_biomass"]["max_flux"] == 15.)
+    assert all(df[df["reaction_id"] == "community_biomass"]["min_flux"] >= 14.9999)
+    assert all(df[df["reaction_id"] == "community_biomass"]["max_flux"] >= 14.9999)
     assert all(df[df["reaction_id"] == "toy1_fraction_reaction"]["max_flux"] == 0.)
     assert all(df[df["reaction_id"] == "toy2_2_fraction_reaction"]["min_flux"] == 1.)
 

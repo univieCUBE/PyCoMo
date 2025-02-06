@@ -1,0 +1,4 @@
+,reaction_id,min_flux,max_flux
+0,toy_1_fraction_reaction,0.0,0.0
+1,toy_2_2_fraction_reaction,1.0,1.0
+2,community_biomass,14.9999,14.9999
