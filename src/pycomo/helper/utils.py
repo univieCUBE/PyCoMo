@@ -5,7 +5,8 @@ import pandas as pd
 import cobra
 import os
 import re
-from cobra.util.process_pool import ProcessPool
+from pycomo.helper.spawnprocesspool import SpawnProcessPool
+import multiprocessing
 from cobra.core import Configuration
 import logging
 
@@ -631,7 +632,7 @@ def _find_loop_step(rxn_id):
     return rxn_id, max_flux, min_flux
 
 
-def find_loops_in_model(model, processes=None):
+def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
@@ -655,16 +656,49 @@ def find_loops_in_model(model, processes=None):
 
     if processes > 1:
         chunk_size = len(reaction_ids) // processes
-        with ProcessPool(
+        time_out_step = min(100, int((max_time_out-time_out)/2.))
+        failed_tasks = []
+        processed_rxns = 0
+        with SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
                 initargs=(tuple([loop_model])),
         ) as pool:
-            for rxn_id, max_flux, min_flux in pool.imap_unordered(
-                    _find_loop_step, reaction_ids, chunksize=chunk_size
-            ):
-                if min_flux != 0. or max_flux != 0.:
-                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+            async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
+            for input_rxn, res in zip(reaction_ids, async_results):
+                try:
+                    res_tuple = res.get(timeout=time_out)
+                    rxn_id, max_flux, min_flux = res_tuple
+                    processed_rxns += 1
+                    if processed_rxns % 10 == 0:
+                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                    if min_flux != 0. or max_flux != 0.:
+                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                except multiprocessing.TimeoutError:
+                    logger.warning(f"Find loops step timed out for rxn {input_rxn}")
+                    failed_tasks.append(input_rxn)
+            if failed_tasks:
+                time_out += time_out_step
+                time_out = min(max_time_out, time_out)
+                logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
+                while failed_tasks and time_out <= max_time_out:
+                    repeat_failed_tasks = []
+                    async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in failed_tasks]
+                    for input_rxn, res in zip(failed_tasks, async_results):
+                        try:
+                            res_tuple = res.get(timeout=time_out)
+                            rxn_id, max_flux, min_flux = res_tuple
+                            processed_rxns += 1
+                            if processed_rxns % 10 == 0:
+                                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                            if min_flux != 0. or max_flux != 0.:
+                                loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                        except multiprocessing.TimeoutError:
+                            logger.warning(f"FVA step timed out again for rxn {input_rxn}")
+                            repeat_failed_tasks.append(input_rxn)
+                    failed_tasks = repeat_failed_tasks
+                    time_out += time_out_step
+                logger.error(f"Find loops failed for several reactions:\n{failed_tasks}")
     else:
         _init_loop_worker(loop_model)
         for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):

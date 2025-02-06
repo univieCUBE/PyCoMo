@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+import multiprocessing
 from optlang.symbolics import Zero
 
 import time
@@ -10,7 +11,7 @@ from .utils import get_f_reactions
 from .logger import configure_logger, get_logger_conf
 
 from cobra.core import Configuration
-from cobra.util.process_pool import ProcessPool
+from pycomo.helper.spawnprocesspool import SpawnProcessPool
 
 if TYPE_CHECKING:
     from cobra import Model
@@ -182,7 +183,9 @@ def loopless_fva(pycomo_model,
                  use_loop_reactions_for_ko=True,
                  ko_candidate_ids=None,
                  verbose=False,
-                 processes=None):
+                 processes=None,
+                 time_out=30,
+                 max_time_out=300):
     """
     Performs flux variability analysis and removes futile cycles from the solutions. This is
     achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
@@ -282,19 +285,52 @@ def loopless_fva(pycomo_model,
 
         if processes > 1:
             chunk_size = len(reaction_ids) // processes
-            with ProcessPool(
+            chunk_size = 1
+            time_out_step = min(100, int((max_time_out-time_out)/2.))
+            if time_out_step < 1: time_out_step = 1
+            failed_tasks = []
+            with SpawnProcessPool(
                     processes,
                     initializer=_init_fva_worker,
                     initargs=(pycomo_model.model, ko_candidate_ids, get_logger_conf()),
             ) as pool:
-                for rxn_id, max_flux, min_flux in pool.imap_unordered(
-                        _loopless_fva_step, reaction_ids, chunksize=chunk_size
-                ):
-                    processed_rxns += 1
-                    if processed_rxns % 10 == 0:
-                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                    result.at[rxn_id, "maximum"] = max_flux
-                    result.at[rxn_id, "minimum"] = min_flux
+                async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in reaction_ids]
+                for input_rxn, res in zip(reaction_ids, async_results):
+                    try:
+                        res_tuple = res.get(timeout=time_out)
+                        rxn_id, max_flux, min_flux = res_tuple
+                        processed_rxns += 1
+                        if processed_rxns % 10 == 0:
+                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                        result.at[rxn_id, "maximum"] = max_flux
+                        result.at[rxn_id, "minimum"] = min_flux
+                        #for worker in pool._pool._pool:
+                            #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                    except multiprocessing.TimeoutError:
+                        logger.warning(f"FVA step timed out for rxn {input_rxn}")
+                        failed_tasks.append(input_rxn)
+                if failed_tasks:
+                    time_out += time_out_step
+                    time_out = min(max_time_out, time_out)
+                    logger.info(f"Repeating failed FVA steps for reactions: {failed_tasks}")
+                    while failed_tasks and time_out <= max_time_out:
+                        repeat_failed_tasks = []
+                        async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in failed_tasks]
+                        for input_rxn, res in zip(failed_tasks, async_results):
+                            try:
+                                res_tuple = res.get(timeout=time_out)
+                                rxn_id, max_flux, min_flux = res_tuple
+                                processed_rxns += 1
+                                if processed_rxns % 10 == 0:
+                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                                result.at[rxn_id, "maximum"] = max_flux
+                                result.at[rxn_id, "minimum"] = min_flux
+                            except multiprocessing.TimeoutError:
+                                logger.warning(f"FVA step timed out again for rxn {input_rxn}")
+                                repeat_failed_tasks.append(input_rxn)
+                        failed_tasks = repeat_failed_tasks
+                        time_out += time_out_step
+                    logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
         else:
             _init_fva_worker(pycomo_model.model, ko_candidate_ids, get_logger_conf())
             for rxn_id, max_flux, min_flux in map(_loopless_fva_step, reaction_ids):
