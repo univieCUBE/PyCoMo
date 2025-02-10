@@ -2273,6 +2273,39 @@ class CommunityModel:
         name = constructor_args["model"].id
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
+    def feasible_composition_range(self, growth_rate=0.):
+        """
+        Computes the range of feasible compositions at a given growth rate. Changes the model into fixed growth-rate structure.
+
+        :param growth_rate: the target growth rate
+        :return: maximum growth-rate
+        """
+        names = self.get_member_names()
+        frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
+
+        # Set growth rate
+        if growth_rate < 0. or np.isnan(growth_rate):
+            raise ValueError(f"The growth rate needs to be equal to or larger than 0 (provided value: {growth_rate})")
+
+        if self.fixed_abundance_flag:
+            logger.debug("Converting to fixed growth-rate")
+            self.convert_to_fixed_growth_rate()
+        logger.debug(f"Setting fixed growth-rate to {growth_rate}")
+        self.apply_fixed_growth_rate(growth_rate)
+
+        # run fva
+        fva_result = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
+        # create new row containing mu_max
+        new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux": [growth_rate], "max_flux": [growth_rate]})
+        # join fva_result with new row
+        result = pd.concat([fva_result, new_row], ignore_index=True)
+        result["min_flux"] = result["min_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+        result["max_flux"] = result["max_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+        logger.info(f"Feasible composition ranges are: {result}")
+
+        return result
+
+
     def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
         """
         Computes the overall maximum growth-rate of the community. Changes the model into fixed growth-rate structure,
