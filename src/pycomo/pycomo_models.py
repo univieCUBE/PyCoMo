@@ -2300,7 +2300,7 @@ class CommunityModel:
         # set starting values
         lb = 0.
         ub = self.max_flux
-        x = (ub - lb) / 2.
+        x = lb + 2*(10. ** (-sensitivity))
         result_difference = self.max_flux
         result = 0.
         x_is_fba_result = False
@@ -2327,7 +2327,11 @@ class CommunityModel:
             try:
                 # run fba
                 logger.debug("Running FBA to see if infeasible")
-                self.model.slim_optimize()
+                objective_value = self.model.slim_optimize()
+                logger.debug(f"Objecive value after FBA: {objective_value}")
+                if np.isnan(objective_value):
+                    # FBA was infeasible
+                    raise cobra.exceptions.Infeasible("Error: Infeasible!")
                 # run fva
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")

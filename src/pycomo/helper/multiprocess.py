@@ -1,15 +1,18 @@
 import logging
 from typing import TYPE_CHECKING
 
+import cobra.exceptions
 import numpy as np
 import pandas as pd
 import multiprocessing
 from optlang.symbolics import Zero
+import traceback
 
 import time
-from .utils import get_f_reactions
+from .utils import get_f_reactions, find_incoherent_bounds
 from .logger import configure_logger, get_logger_conf
 
+import cobra
 from cobra.core import Configuration
 from pycomo.helper.spawnprocesspool import SpawnProcessPool
 
@@ -136,45 +139,49 @@ def _loopless_fva_step(rxn_id):
     FVA)
     """
     logger.debug(f"Starting loopless FVA step for rxn {rxn_id}")
-    rxn = _model.reactions.get_by_id(rxn_id)
-    perform_loopless_on_rxn = True
-    if rxn not in _ll_candidates:
-        perform_loopless_on_rxn = False
-    elif rxn.boundary:
-        perform_loopless_on_rxn = False
+    try:
+        rxn = _model.reactions.get_by_id(rxn_id)
+        perform_loopless_on_rxn = True
+        if rxn not in _ll_candidates:
+            perform_loopless_on_rxn = False
+        elif rxn.boundary:
+            perform_loopless_on_rxn = False
 
-    if perform_loopless_on_rxn:
-        logger.info(f"Loop correction will be applied on {rxn.id}")
+        if perform_loopless_on_rxn:
+            logger.info(f"Loop correction will be applied on {rxn.id}")
 
-    _model.objective = rxn.id
-    solution = _model.optimize("minimize")
-    if not solution.status == "infeasible":
-        if perform_loopless_on_rxn:
-            logger.debug(f"{rxn.id} Starting loop correction")
-            with _model:
-                _add_loopless_constraints_and_objective(solution.fluxes)
-                logger.debug(f"{rxn.id} Optimize for loopless flux")
-                solution = _model.optimize()
-                logger.debug(f"{rxn.id} Optimization for loopless flux finished")
-        min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
-    else:
-        logger.debug(f"{rxn.id} min flux is infeasible")
-        min_flux = 0.
-    solution = _model.optimize("maximize")
-    if not solution.status == "infeasible":
-        if perform_loopless_on_rxn:
-            logger.debug(f"{rxn.id} Starting loop correction")
-            with _model:
-                _add_loopless_constraints_and_objective(solution.fluxes)
-                logger.debug(f"{rxn.id} Optimize for loopless flux")
-                solution = _model.optimize()
-                logger.debug(f"{rxn.id} Optimization for loopless flux finished")
-        max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
-    else:
-        logger.debug(f"{rxn.id} max flux is infeasible")
-        max_flux = 0.
-    logger.debug(f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
-    return rxn_id, max_flux, min_flux
+        _model.objective = rxn.id
+        solution = _model.optimize("minimize")
+        if not solution.status == "infeasible":
+            if perform_loopless_on_rxn:
+                logger.debug(f"{rxn.id} Starting loop correction")
+                with _model:
+                    _add_loopless_constraints_and_objective(solution.fluxes)
+                    logger.debug(f"{rxn.id} Optimize for loopless flux")
+                    solution = _model.optimize()
+                    logger.debug(f"{rxn.id} Optimization for loopless flux finished")
+            min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
+        else:
+            logger.debug(f"{rxn.id} min flux is infeasible")
+            min_flux = 0.
+        solution = _model.optimize("maximize")
+        if not solution.status == "infeasible":
+            if perform_loopless_on_rxn:
+                logger.debug(f"{rxn.id} Starting loop correction")
+                with _model:
+                    _add_loopless_constraints_and_objective(solution.fluxes)
+                    logger.debug(f"{rxn.id} Optimize for loopless flux")
+                    solution = _model.optimize()
+                    logger.debug(f"{rxn.id} Optimization for loopless flux finished")
+            max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
+        else:
+            logger.debug(f"{rxn.id} max flux is infeasible")
+            max_flux = 0.
+        logger.debug(f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
+        return rxn_id, max_flux, min_flux
+    except Exception as e:
+        logger.error(f"Error thrown in FVA step {rxn_id}")
+        return f"Error: {e}\n{traceback.format_exc()}"
 
 
 def loopless_fva(pycomo_model,
@@ -245,6 +252,9 @@ def loopless_fva(pycomo_model,
                 fraction_of_optimum = 1.0
 
             objective_value = pycomo_model.model.slim_optimize()
+            if np.isnan(objective_value):
+                raise cobra.exceptions.Infeasible("Error: Infeasible!")
+            logger.debug(f"Objective Value is {objective_value}, type: {type(objective_value)}, resulting product: {fraction_of_optimum * objective_value}")
             if pycomo_model.model.solver.objective.direction == "max":
                 original_objective = pycomo_model.model.problem.Variable(
                     "original_objective",
@@ -298,6 +308,9 @@ def loopless_fva(pycomo_model,
                 for input_rxn, res in zip(reaction_ids, async_results):
                     try:
                         res_tuple = res.get(timeout=time_out)
+                        if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                            logger.error(f"Worker error captured:\n{res_tuple}")
+                            raise ValueError(f"Worker error captured:\n{res_tuple}")
                         rxn_id, max_flux, min_flux = res_tuple
                         processed_rxns += 1
                         if processed_rxns % 10 == 0:
@@ -333,7 +346,11 @@ def loopless_fva(pycomo_model,
                     logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
         else:
             _init_fva_worker(pycomo_model.model, ko_candidate_ids, get_logger_conf())
-            for rxn_id, max_flux, min_flux in map(_loopless_fva_step, reaction_ids):
+            for res_tuple in map(_loopless_fva_step, reaction_ids):
+                if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                    logger.error(f"Worker error captured:\n{res_tuple}")
+                    raise ValueError(f"Worker error captured:\n{res_tuple}")
+                rxn_id, max_flux, min_flux = res_tuple
                 processed_rxns += 1
                 if processed_rxns % 10 == 0:
                     logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")

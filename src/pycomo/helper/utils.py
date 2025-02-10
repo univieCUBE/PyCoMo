@@ -5,6 +5,7 @@ import pandas as pd
 import cobra
 import os
 import re
+import numpy as np
 from pycomo.helper.spawnprocesspool import SpawnProcessPool
 import multiprocessing
 from cobra.core import Configuration
@@ -729,3 +730,25 @@ def replace_metabolite_stoichiometry(rxn, new_stoich):
     rxn.subtract_metabolites(stoich_to_subtract, combine=True)
     rxn.add_metabolites(new_stoich, combine=True)
     return
+
+def find_incoherent_bounds(model):
+    """
+    Find incoherent bounds (lb > ub, bounds with NaN) and return them.
+    :param model: a cobrapy model
+    :return: A list of reactions with incoherent bounds. If none are found, returns an empty list
+    """
+    result = []
+    for rxn in model.reactions:
+        faulty_reaction = False
+        if np.isnan(rxn.lower_bound):
+            logger.info(f"Lower bound of reaction {rxn.id} is NaN!")
+            faulty_reaction = True
+        if np.isnan(rxn.upper_bound):
+            logger.info(f"Upper bound of reaction {rxn.id} is NaN!")
+            faulty_reaction = True
+        if rxn.lower_bound > rxn.upper_bound:
+            logger.info(f"Lower bound exceeds upper bound in reaction {rxn.id}!")
+            faulty_reaction = True
+        if faulty_reaction:
+            result.append(rxn)
+    return result
