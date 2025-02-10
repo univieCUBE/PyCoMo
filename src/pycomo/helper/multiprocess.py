@@ -358,3 +358,200 @@ def loopless_fva(pycomo_model,
                 result.at[rxn_id, "minimum"] = min_flux
 
     return result
+
+
+def _fva_step(rxn_id):
+    """
+    Performs a single step in FVA. The
+    output of the step is the minimum and maximum flux for the given reaction ID.
+
+    :param rxn_id: The target reaction
+    :return rxn_id, max_flux, min_flux: The input reaction ID, maximum flux and minimum flux (as calculated by loopless
+    FVA)
+    """
+    logger.debug(f"Starting FVA step for rxn {rxn_id}")
+    try:
+        rxn = _model.reactions.get_by_id(rxn_id)
+
+        _model.objective = rxn.id
+        logger.debug(f"Running minimize for rxn {rxn_id}")
+        solution = _model.optimize("minimize")
+        logger.debug(f"Running minimize finished for rxn {rxn_id}")
+        if not solution.status == "infeasible":
+            min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
+        else:
+            logger.debug(f"{rxn.id} min flux is infeasible")
+            min_flux = 0.
+        logger.debug(f"Running maximize for rxn {rxn_id}")
+        logger.debug(f"Model Problem:\n{_model.solver.to_lp()}") 
+        solution = _model.optimize("maximize")
+        logger.debug(f"Running maximize finished for rxn {rxn_id}")
+        if not solution.status == "infeasible":
+            max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
+        else:
+            logger.debug(f"{rxn.id} max flux is infeasible")
+            max_flux = 0.
+        logger.debug(f"FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
+        return rxn_id, max_flux, min_flux
+    except Exception as e:
+        logger.error(f"Error thrown in FVA step {rxn_id}")
+        return f"Error: {e}\n{traceback.format_exc()}"
+    
+
+def fva(pycomo_model,
+        reactions,
+        fraction_of_optimum=None,
+        verbose=False,
+        processes=None,
+        time_out=30,
+        max_time_out=300):
+    """
+    Performs flux variability analysis.
+
+    :param pycomo_model: A pycomo community metabolic model
+    :param reactions: A list of reactions that should be analysed
+    :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
+    :param use_loop_reactions_for_ko: Find loops in the model and use these reactions as ko_candidates. Overwrites
+    value in ko_candidates
+    :param ko_candidate_ids: Reactions to be constrained and used in the objective (as set of reaction ids)
+    :param verbose: Prints progress messages
+    :param processes: The number of processes to use for the calculation
+    :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
+    reaction IDs
+    """
+
+    if verbose:
+        logger.info("Starting FVA")
+    else:
+        logger.debug("Starting FVA")
+    if verbose:
+        logger.info("Preparing model")
+    else:
+        logger.debug("Preparing model")
+
+    reaction_ids = [r.id for r in reactions]
+
+    with pycomo_model.model:  # Revert changes to the model after fva
+        if verbose:
+            logger.info("Model prepared")
+        else:
+            logger.debug("Model prepared")
+
+        if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
+            if verbose:
+                logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
+            else:
+                logger.debug(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
+            fraction_of_optimum = float(fraction_of_optimum)
+            if not (0. <= fraction_of_optimum <= 1.):
+                logger.warning(f"fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
+                               f"Continuing with fraction_of_optimum=1")
+                fraction_of_optimum = 1.0
+
+            objective_value = pycomo_model.model.slim_optimize()
+            if np.isnan(objective_value):
+                raise cobra.exceptions.Infeasible("Error: Infeasible!")
+            logger.debug(f"Objective Value is {objective_value}, type: {type(objective_value)}, resulting product: {fraction_of_optimum * objective_value}")
+            if pycomo_model.model.solver.objective.direction == "max":
+                original_objective = pycomo_model.model.problem.Variable(
+                    "original_objective",
+                    lb=fraction_of_optimum * objective_value,
+                )
+            else:
+                original_objective = pycomo_model.model.problem.Variable(
+                    "original_objective",
+                    ub=fraction_of_optimum * objective_value,
+                )
+            original_objective_constraint = pycomo_model.model.problem.Constraint(
+                pycomo_model.model.solver.objective.expression - original_objective,
+                lb=0,
+                ub=0,
+                name="original_objective_constraint",
+            )
+            pycomo_model.model.add_cons_vars([original_objective, original_objective_constraint])
+
+        # Carry out fva
+        num_rxns = len(reaction_ids)
+
+        result = pd.DataFrame(
+            {
+                "minimum": np.zeros(num_rxns, dtype=float),
+                "maximum": np.zeros(num_rxns, dtype=float),
+            },
+            index=reaction_ids,
+        )
+
+        if processes is None:
+            processes = configuration.processes
+
+        processes = min(processes, num_rxns)
+
+        logger.debug(f"Running with {processes} processes")
+
+        processed_rxns = 0
+
+        if processes > 1:
+            chunk_size = len(reaction_ids) // processes
+            chunk_size = 1
+            time_out_step = min(100, int((max_time_out-time_out)/2.))
+            if time_out_step < 1: time_out_step = 1
+            failed_tasks = []
+            with SpawnProcessPool(
+                    processes,
+                    initializer=_init_fva_worker,
+                    initargs=(pycomo_model.model, [], get_logger_conf()),
+            ) as pool:
+                async_results = [pool.apply_async(_fva_step, args=(r,)) for r in reaction_ids]
+                for input_rxn, res in zip(reaction_ids, async_results):
+                    try:
+                        res_tuple = res.get(timeout=time_out)
+                        if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                            logger.error(f"Worker error captured:\n{res_tuple}")
+                            raise ValueError(f"Worker error captured:\n{res_tuple}")
+                        rxn_id, max_flux, min_flux = res_tuple
+                        processed_rxns += 1
+                        if processed_rxns % 10 == 0:
+                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                        result.at[rxn_id, "maximum"] = max_flux
+                        result.at[rxn_id, "minimum"] = min_flux
+                        #for worker in pool._pool._pool:
+                            #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                    except multiprocessing.TimeoutError:
+                        logger.warning(f"FVA step timed out for rxn {input_rxn}")
+                        failed_tasks.append(input_rxn)
+                if failed_tasks:
+                    time_out += time_out_step
+                    time_out = min(max_time_out, time_out)
+                    logger.info(f"Repeating failed FVA steps for reactions: {failed_tasks}")
+                    while failed_tasks and time_out <= max_time_out:
+                        repeat_failed_tasks = []
+                        async_results = [pool.apply_async(_fva_step, args=(r,)) for r in failed_tasks]
+                        for input_rxn, res in zip(failed_tasks, async_results):
+                            try:
+                                res_tuple = res.get(timeout=time_out)
+                                rxn_id, max_flux, min_flux = res_tuple
+                                processed_rxns += 1
+                                if processed_rxns % 10 == 0:
+                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                                result.at[rxn_id, "maximum"] = max_flux
+                                result.at[rxn_id, "minimum"] = min_flux
+                            except multiprocessing.TimeoutError:
+                                logger.warning(f"FVA step timed out again for rxn {input_rxn}")
+                                repeat_failed_tasks.append(input_rxn)
+                        failed_tasks = repeat_failed_tasks
+                        time_out += time_out_step
+                    logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
+        else:
+            _init_fva_worker(pycomo_model.model, [], get_logger_conf())
+            for res_tuple in map(_fva_step, reaction_ids):
+                if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                    logger.error(f"Worker error captured:\n{res_tuple}")
+                    raise ValueError(f"Worker error captured:\n{res_tuple}")
+                rxn_id, max_flux, min_flux = res_tuple
+                processed_rxns += 1
+                if processed_rxns % 10 == 0:
+                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                result.at[rxn_id, "maximum"] = max_flux
+                result.at[rxn_id, "minimum"] = min_flux
+
+    return result

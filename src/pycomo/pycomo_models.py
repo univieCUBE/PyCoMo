@@ -1823,11 +1823,10 @@ class CommunityModel:
                         logger.info(f"Running FVA")
                     else:
                         logger.debug("Running FVA")
-                    solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                            reactions,
-                                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                                            loopless=False,
-                                                                                            processes=processes)
+                    solution_df = fva(self,
+                                      reactions,
+                                      fraction_of_optimum=fraction_of_optimum,
+                                      processes=processes)
 
                 logger.debug("FVA finished!")
                 # Revert changes
@@ -1865,11 +1864,10 @@ class CommunityModel:
                 else:
                     if verbose:
                         logger.info(f"Running FVA")
-                    solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                            reactions,
-                                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                                            loopless=False,
-                                                                                            processes=processes)
+                    solution_df = fva(self,
+                                      reactions,
+                                      fraction_of_optimum=fraction_of_optimum,
+                                      processes=processes)
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1895,11 +1893,10 @@ class CommunityModel:
                     logger.info(f"Running FVA")
                 else:
                     logger.debug(f"Running FVA")
-                solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                        reactions,
-                                                                                        fraction_of_optimum=fraction_of_optimum,
-                                                                                        loopless=False,
-                                                                                        processes=processes)
+                solution_df = fva(self,
+                                  reactions,
+                                  fraction_of_optimum=fraction_of_optimum,
+                                  processes=processes)
             logger.debug("FVA finished")
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
