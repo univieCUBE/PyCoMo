@@ -3,7 +3,7 @@ import os
 import pickle
 from platform import system
 from tempfile import mkstemp
-from multiprocessing import get_context
+from multiprocessing import get_context, Pool
 from cobra.util.process_pool import ProcessPool, _init_win_worker
 from typing import Any, Callable, Optional, Tuple, Type
 import logging
@@ -33,8 +33,7 @@ class SpawnProcessPool(ProcessPool):
         platform-specific defaults.
         """
         logger.debug("Init SpawnProcessPool")
-        # Call parent class's __init__ but skip its Pool creation
-        super().__init__(**kwargs)
+        Pool.__init__(self, **kwargs)
         
         # Handle Windows-specific initialization same as parent
         self._filename = None
