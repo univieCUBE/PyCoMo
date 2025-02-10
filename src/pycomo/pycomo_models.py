@@ -1535,7 +1535,7 @@ class CommunityModel:
         model = self.model
         abd_rxn_mets = {}
         for member_name, fraction in abd_dict.items():
-            if fraction < cobra.Configuration().tolerance:
+            if fraction < cobra.Configuration().tolerance and fraction != 0.:
                 logger.warning(f"Abundance of {member_name} is lower than the solver tolerance:" 
                                f"{fraction} < {cobra.Configuration().tolerance}. "
                                f"This can lead to problems with the solver!")
