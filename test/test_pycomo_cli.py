@@ -99,3 +99,29 @@ def test_cli_log_file(monkeypatch):
         args = parser.parse_args()
         args = pycomo.helper.cli.check_args(args)
         assert 'test.log' in args.log_file
+
+
+def test_cli_help_message(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(sys, 'argv', ['pycomo',
+                                '-h'
+                                ])
+        with pytest.raises(SystemExit):
+            parser = pycomo.helper.cli.create_arg_parser()
+            args = parser.parse_args()
+            args = pycomo.helper.cli.check_args(args)
+            captured = monkeypatch.readouterr()
+            assert "usage" in captured
+
+
+def test_cli_version_message(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(sys, 'argv', ['pycomo',
+                                '-v'
+                                ])
+        with pytest.raises(SystemExit):
+            parser = pycomo.helper.cli.create_arg_parser()
+            args = parser.parse_args()
+            args = pycomo.helper.cli.check_args(args)
+            captured = monkeypatch.readouterr()
+            assert "version" in captured
