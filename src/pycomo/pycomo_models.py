@@ -906,6 +906,7 @@ class CommunityModel:
         if not all([isinstance(value, float) for value in medium_dict.values()]):
             raise TypeError("Medium values must be floats!")
         self._medium = medium_dict
+        self.apply_medium()
 
     def is_transporter(self, rxn):
         if rxn in self.f_reactions:

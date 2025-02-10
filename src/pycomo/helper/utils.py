@@ -654,12 +654,13 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
         processes = configuration.processes
 
     processes = min(processes, num_rxns)
+    processed_rxns = 0
 
     if processes > 1:
         chunk_size = len(reaction_ids) // processes
         time_out_step = min(100, int((max_time_out-time_out)/2.))
         failed_tasks = []
-        processed_rxns = 0
+        
         with SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
