@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import os
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -105,3 +106,29 @@ def test_community_model_special_rxn_getters():
     assert f_rxns == f_rxn_sol
 
 
+def test_community_model_low_abundance_warning():
+    if os.path.isfile("test/data/output/community_model.log"):
+        os.remove("test/data/output/community_model.log")
+    pycomo.configure_logger(level="info", log_file="test/data/output/community_model.log")
+
+    model = dummy_model()
+    model.objective = "EX_bio"
+    com_model = pycomo.CommunityModel(models=[
+        pycomo.SingleOrganismModel(model.copy(), name="m1"),
+        pycomo.SingleOrganismModel(model.copy(), name="m2")]
+    )
+    com_model.convert_to_fixed_abundance()
+    com_model.apply_fixed_abundance({"m1": 10**-10, "m2": 1-(10**-10)})  # Assign very low abundance
+    
+    with open("test/data/output/community_model.log", "r") as log_file:
+        lines = log_file.readlines()
+        assert any("Abundance of m1 is lower than the solver tolerance" in message for message in lines), "Abundance warning not logged!"
+    
+    cobra.Configuration().tolerance = 10**-1
+    com_model.apply_fixed_abundance({"m2": 10**-2, "m1": 1-(10**-2)})  # Assign very low abundance
+    
+    with open("test/data/output/community_model.log", "r") as log_file:
+        lines = log_file.readlines()
+        assert any("Abundance of m2 is lower than the solver tolerance" in message for message in lines), "Abundance warning not logged!"
+    
+    cobra.Configuration().tolerance = 10**-6

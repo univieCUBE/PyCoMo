@@ -671,7 +671,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     res_tuple = res.get(timeout=time_out)
                     rxn_id, max_flux, min_flux = res_tuple
                     processed_rxns += 1
-                    if processed_rxns % 10 == 0:
+                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
                         logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
                     if min_flux != 0. or max_flux != 0.:
                         loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
@@ -690,8 +690,8 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                             res_tuple = res.get(timeout=time_out)
                             rxn_id, max_flux, min_flux = res_tuple
                             processed_rxns += 1
-                            if processed_rxns % 10 == 0:
-                                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
                             if min_flux != 0. or max_flux != 0.:
                                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
                         except multiprocessing.TimeoutError:
@@ -700,9 +700,20 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     failed_tasks = repeat_failed_tasks
                     time_out += time_out_step
                 logger.error(f"Find loops failed for several reactions:\n{failed_tasks}")
+                # Single core fallback
+                logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+                    processed_rxns += 1
+                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                    if min_flux != 0. or max_flux != 0.:
+                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
     else:
         _init_loop_worker(loop_model)
         for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+            processed_rxns += 1
+            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
             if min_flux != 0. or max_flux != 0.:
                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
 

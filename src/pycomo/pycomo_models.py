@@ -926,7 +926,7 @@ class CommunityModel:
                 return True
         return False
 
-    def summary(self, suppress_f_metabolites=True):
+    def summary(self, suppress_f_metabolites=True, catch_infeasible=False):
         """
         Calls and returns the summary method of community metabolic model. Dummy metabolites and reactions can be
         excluded from the flux report by setting the suppress_f_metabolites flag.
@@ -934,20 +934,27 @@ class CommunityModel:
         :param suppress_f_metabolites: If true, excludes dummy metabolites and reactions from the flux report
         :return: The COBRApy summary object of the community metabolic model
         """
-        summary = self.model.summary()
+        try:
 
-        if suppress_f_metabolites:
-            model = self.model
-            new_secretion_flux_rows = []
-            old_secretion_flux = summary.secretion_flux
-            for idx, row in old_secretion_flux.iterrows():
-                if model.metabolites.get_by_id(row["metabolite"]).compartment != "fraction_reaction":
-                    new_secretion_flux_rows.append(row)
+            summary = self.model.summary()
 
-            new_secretion_flux = pd.DataFrame(new_secretion_flux_rows)
-            summary.secretion_flux = new_secretion_flux
+            if suppress_f_metabolites:
+                model = self.model
+                new_secretion_flux_rows = []
+                old_secretion_flux = summary.secretion_flux
+                for idx, row in old_secretion_flux.iterrows():
+                    if model.metabolites.get_by_id(row["metabolite"]).compartment != "fraction_reaction":
+                        new_secretion_flux_rows.append(row)
 
-        return summary
+                new_secretion_flux = pd.DataFrame(new_secretion_flux_rows)
+                summary.secretion_flux = new_secretion_flux
+
+            return summary
+        except cobra.exceptions.Infeasible as e:
+            if catch_infeasible:
+                return "Infeasible!"
+            else:
+                raise e
 
     def generate_member_name_conversion_dict(self):
         """
@@ -1499,9 +1506,9 @@ class CommunityModel:
             raise ValueError(err_msg)
 
         # Check that abundances sum to 1
-        logger.debug("Checking if the sum of abundances is 1.")
+        logger.debug(f"Checking if the sum of abundances is 1: {abd_dict}")
         if not np.isclose([sum(abd_dict.values())], [1.]):
-            logger.warning(f"Warning: Abundances do not sum up to 1. Correction will be applied")
+            logger.warning(f"Warning: Abundances do not sum up to 1. Correction will be applied: {abd_dict}")
             if sum(abd_dict.values()) == 0.:
                 logger.error(f"Error: The sum of abundances is 0")
                 raise ValueError
@@ -1527,6 +1534,10 @@ class CommunityModel:
         model = self.model
         abd_rxn_mets = {}
         for member_name, fraction in abd_dict.items():
+            if fraction < cobra.Configuration().tolerance:
+                logger.warning(f"Abundance of {member_name} is lower than the solver tolerance:" 
+                               f"{fraction} < {cobra.Configuration().tolerance}. "
+                               f"This can lead to problems with the solver!")
             logger.debug(f"Setting abundance for {member_name}")
             try:
                 f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
@@ -1691,6 +1702,7 @@ class CommunityModel:
 
         self._model = medium_model
         self.medium_flag = True
+        self.model.reactions.abundance_reaction.bounds = 0.,1000.
         return medium_model
 
     def run_fba(self):
@@ -2554,11 +2566,13 @@ def doall(model_folder="",
     com_model_obj = None
     if com_model is not None:
         # Load community model
+        logger.info(f"Loading community model from file {com_model}")
         com_model_obj = CommunityModel.load(com_model)
     else:
         # Load single organism models
         # Either from folder or as list of file names or list of cobra models
         if model_folder != "":
+            logger.info(f"Loading member models from folder {model_folder}")
             named_models = load_named_models_from_dir(model_folder)
             if len(named_models) == 0:
                 raise ValueError(
@@ -2573,6 +2587,7 @@ def doall(model_folder="",
             # Extract names and store in named models
             named_models = {model.name: model for model in models}
         elif all(list(map(lambda x: isinstance(x, str), models))):
+            logger.info(f"Loading member models from files")
             named_models = {}
             for model_path in models:
                 model, name = load_named_model(model_path)
@@ -2584,14 +2599,17 @@ def doall(model_folder="",
         single_org_models = [SingleOrganismModel(model, name) for name, model in named_models.items()]
 
         # Create a community model
+        logger.info(f"Creating a community model")
         com_model_obj = CommunityModel(single_org_models, community_name, merge_via_annotation=merge_via_annotation)
         com_model_obj.generate_community_model()
 
     if fixed_growth_rate is None:
         # Apply abundance (either None, "equal", or an abundance dict)
         if abundance == "equal":
+            logger.info(f"Setting to equal abundance")
             com_model_obj.equal_abundance()
         elif isinstance(abundance, dict):
+            logger.info(f"Setting abundances accordung to {abundance}")
             name_conversion = com_model_obj.generate_member_name_conversion_dict()
             tmp_abundance = {}
             try:
@@ -2611,19 +2629,23 @@ def doall(model_folder="",
             logger.error(f"Error: Specified growth rate is negative ({fixed_growth_rate}). PyCoMo will continue with a "
                          f"growth rate set to 0.")
             fixed_growth_rate = 0.
+        logger.info(f"Setting to fixed growth rate ({fixed_growth_rate})")
         com_model_obj.convert_to_fixed_growth_rate()
         com_model_obj.apply_fixed_growth_rate(fixed_growth_rate)
 
     # Apply medium
     if medium is not None:
+        logger.info(f"Loading medium from file")
         com_model_obj.load_medium_from_file(medium)
         com_model_obj.apply_medium()
 
     if sbml_output_file is not None:
+        logger.info(f"Saving model to {os.path.join(out_dir, sbml_output_file)}")
         com_model_obj.save(os.path.join(out_dir, sbml_output_file))
 
     fva_flux_vector = None
     if fva_interaction_file is not None:
+        logger.info(f"Running FVA")
         try:
             interaction_df, fva_flux_vector = com_model_obj.potential_metabolite_exchanges(
                 fba=False,
@@ -2639,6 +2661,7 @@ def doall(model_folder="",
             logger.warning(f"FVA of community is infeasible. No FVA interaction file was generated.")
 
     if fva_solution_file is not None:
+        logger.info(f"Running FVA")
         try:
             if fva_flux_vector is not None:
                 # Use flux vector from interactions
@@ -2655,6 +2678,7 @@ def doall(model_folder="",
 
     fba_flux_vector = None
     if fba_interaction_file is not None:
+        logger.info(f"Running FBA")
         try:
             interaction_df, fba_flux_vector = com_model_obj.potential_metabolite_exchanges(fba=True,
                                                                                            return_flux_vector=True)
@@ -2665,6 +2689,7 @@ def doall(model_folder="",
             logger.warning(f"FBA of community is infeasible. No FBA interaction file was generated.")
 
     if fba_solution_file is not None:
+        logger.info(f"Running FBA")
         try:
             if fba_flux_vector is not None:
                 # Use flux vector from interactions
@@ -2676,6 +2701,7 @@ def doall(model_folder="",
             logger.warning(f"FBA of community is infeasible. No FBA flux vector file was generated.")
 
     if max_growth_rate_file is not None:
+        logger.info(f"Calculating the maximum growth rate")
         try:
             growth_df = com_model_obj.max_growth_rate(sensitivity=4, return_abundances=True)
             growth_df.to_csv(os.path.join(out_dir, max_growth_rate_file))

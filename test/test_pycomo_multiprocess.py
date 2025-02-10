@@ -49,8 +49,13 @@ def mock_fva_step(_):
     raise multiprocessing.TimeoutError("Mock timeout")
 
 def mock_fva_step_sleep(r):
-    time.sleep(0.2)
-    return r, 1., 0.
+    try:
+        print("Starting to sleep")
+        time.sleep(0.2)
+        print("Finished sleeping")
+        return r, 1., 0.
+    except Exception as e:
+        return e
 
 @pytest.mark.asyncio
 async def test_fva_worker_timeout_handling(caplog):
@@ -100,7 +105,7 @@ async def test_fva_worker_timeout_repetition():
 
         if os.path.isfile("test/data/output/multiprocess.log"):
             os.remove("test/data/output/multiprocess.log")
-        pycomo.configure_logger(level="info", log_file="test/data/output/multiprocess.log")
+        pycomo.configure_logger(level="debug", log_file="test/data/output/multiprocess.log")
 
         model = dummy_com_model()
         result = loopless_fva(pycomo_model=model,
@@ -114,7 +119,7 @@ async def test_fva_worker_timeout_repetition():
             lines = log_file.readlines()
             assert any("FVA step timed out" in message for message in lines), "Timeout warning not logged!"
             assert any("Repeating failed FVA steps for reactions" in message for message in lines), "Repetition info not logged!"
-            assert not any("FVA step timed out again for rxn" in message for message in lines), "Reactions still timed out!"
+            assert any("Processed 100.0% of fva steps" in message for message in lines), "Not all reactions finished!"
         assert all(result["maximum"]==1.)
         assert all(result["minimum"]==0.)
             
