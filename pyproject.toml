@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycomo"
-version = "0.2.7"
+version = "0.2.8"
 description = "PyCoMo is a software package for generating and analysing compartmentalized community metabolic models"
 license = {file = "LICENSE"}
 authors = [
