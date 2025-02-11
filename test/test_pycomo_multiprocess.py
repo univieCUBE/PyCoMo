@@ -71,7 +71,7 @@ async def test_fva_worker_timeout_handling(caplog):
         pycomo.helper.multiprocess._loopless_fva_step = mock_fva_step_sleep
 
         if os.path.isfile("test/data/output/multiprocess.log"):
-            os.remove("test/data/output/multiprocess.log")
+            open("test/data/output/multiprocess.log", "w").close()
         pycomo.configure_logger(level="info", log_file="test/data/output/multiprocess.log")
 
         model = dummy_com_model()
@@ -104,7 +104,7 @@ async def test_fva_worker_timeout_repetition():
         pycomo.helper.multiprocess._loopless_fva_step = mock_fva_step_sleep
 
         if os.path.isfile("test/data/output/multiprocess.log"):
-            os.remove("test/data/output/multiprocess.log")
+            open("test/data/output/multiprocess.log", "w").close()
         pycomo.configure_logger(level="debug", log_file="test/data/output/multiprocess.log")
 
         model = dummy_com_model()
