@@ -1,0 +1,11 @@
+reaction_id	min_flux	max_flux
+toy_1_TF_S1_toy_1_e	-5.000000	-4.000000
+toy_1_TF_C_toy_1_e	0.000000	1.000000
+EX_S1_medium	-5.000000	-4.000000
+EX_C_medium	-1.666667	-0.333333
+toy_1_to_community_biomass	4.000000	5.000000
+toy_2_2_TF_S2_toy_2_2_e	-3.333333	-2.666667
+toy_2_2_TF_C_toy_2_2_e	-1.666667	-1.333333
+EX_S2_medium	-3.333333	-2.666667
+toy_2_2_to_community_biomass	4.000000	5.000000
+community_biomass	8.000000	10.000000

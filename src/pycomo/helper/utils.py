@@ -5,17 +5,13 @@ import pandas as pd
 import cobra
 import os
 import re
-from cobra.util.process_pool import ProcessPool
+import numpy as np
+from pycomo.helper.spawnprocesspool import SpawnProcessPool
+import multiprocessing
 from cobra.core import Configuration
 import logging
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+logger = logging.getLogger("pycomo")
 logger.info('Utils Logger initialized.')
 
 configuration = Configuration()
@@ -167,18 +163,21 @@ def load_named_models_from_dir(path, file_format="sbml"):
     return named_models
 
 
-def close_to_zero(num, t=10**-10):
+def close_to_zero(num, t=None):
     """
-    Checks whether a number is within threshold t of 0.
+    Checks whether a number is within threshold t of 0. Default threshold t is the solver tolerance.
 
     :param num: The number to be checked
     :param t: The threshold around 0
     :return: True if the number is within threshold t of 0, otherwise False
     """
+    if t is None:
+        t = cobra.Configuration().tolerance
     return -t < num < t
 
 
-def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_id="", generate_if_none=False):
+def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_id="", generate_if_none=False,
+                               return_biomass_rxn=False):
     """
     Finds the biomass metabolite in a model. A biomass metabolite can also be created, if the biomass reaction
     (objective) does not produce any metabolites.
@@ -188,21 +187,44 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
     :param expected_biomass_id: The ID of the biomass metabolite if already known or suspected
     :param generate_if_none: If True, a biomass metabolite is created if the objective function does not produce a
         metabolite
-    :raises AssertionError: This error is raised if the biomass metabolite cannot be determined
+    :param return_biomass_rxn: If True, return the identified biomass reaction as well
+    :raises KeyError: This error is raised if the biomass metabolite cannot be determined
     :return: The biomass metabolite as COBRApy metabolite
     """
+    if str(model.objective.expression) in ["0.0", "0"]:
+        raise ValueError(f"Model objective is not set.")
+    elif "*" not in str(model.objective.expression):
+        raise ValueError(f"Unknown objective format. Biomass reaction could not be determined."
+                         f"\nObjective: {str(model.objective.expression)}")
+
     objective = str(model.objective.expression).split("*")[1].split(' ')[0]
     biomass_rxn = model.reactions.get_by_id(objective)
+    logger.info(f"Identified biomass reaction from objective: {biomass_rxn.id}")
     biomass_products = model.reactions.get_by_id(objective).products
     biomass_met = None
     if len(expected_biomass_id) > 0:
         if expected_biomass_id in [met.id for met in biomass_products]:
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
         elif expected_biomass_id in [met.id for met in model.metabolites]:
-            logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective function.")
+            logger.warning(f"WARNING: expected biomass id {expected_biomass_id} is not a product of the objective "
+                           f"function.")
             biomass_met = model.metabolites.get_by_id(expected_biomass_id)
+            biomass_producing_reactions = []
+            for rxn in biomass_met.reactions:
+                if biomass_met in rxn.products:
+                    biomass_producing_reactions.append(rxn)
+            if len(biomass_producing_reactions) == 1:
+                biomass_rxn = biomass_producing_reactions[0]
+                logger.info(f"Identified biomass reaction expected biomass metabolite: {biomass_rxn.id}")
+            elif len(biomass_producing_reactions) == 0:
+                logger.warning(f"No reaction in the model is producing the expected biomass metabolite "
+                               f"{expected_biomass_id}!")
+                biomass_rxn = None
+            elif len(biomass_producing_reactions) > 1:
+                logger.warning(f"Multiple reactions produce the expected biomass metabolite {expected_biomass_id}")
+                biomass_rxn = None
         else:
-            raise AssertionError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
+            raise KeyError(f"Expected biomass metabolite {expected_biomass_id} is not found in the model.")
     elif len(biomass_products) == 0:
         # No metabolites produced
         if generate_if_none:
@@ -212,7 +234,7 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
             model.add_metabolites([biomass_met])
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
-            raise AssertionError(f"No biomass compound could be found in objective\nObjective id: {objective}")
+            raise KeyError(f"No biomass compound could be found in objective\nObjective id: {objective}")
     elif len(biomass_products) == 1:
         biomass_met = biomass_products[0]
     else:
@@ -224,8 +246,11 @@ def get_model_biomass_compound(model, shared_compartment_name, expected_biomass_
             model.add_metabolites([biomass_met])
             biomass_rxn.add_metabolites({biomass_met: 1.})
         else:
-            raise AssertionError(f"Multiple products in objective, biomass metabolite is ambiguous. Please set it "
-                                 f"manually.\nObjective id: {objective}")
+            raise KeyError(f"Multiple products in objective, biomass metabolite is ambiguous. Please set it "
+                           f"manually.\nObjective id: {objective}")
+    logger.debug(f"Final identified biomass rxn: {biomass_rxn}: {biomass_rxn.metabolites}")
+    if return_biomass_rxn:
+        return biomass_met, biomass_rxn
     return biomass_met
 
 
@@ -608,7 +633,7 @@ def _find_loop_step(rxn_id):
     return rxn_id, max_flux, min_flux
 
 
-def find_loops_in_model(model, processes=None):
+def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
@@ -629,24 +654,113 @@ def find_loops_in_model(model, processes=None):
         processes = configuration.processes
 
     processes = min(processes, num_rxns)
+    processed_rxns = 0
 
     if processes > 1:
         chunk_size = len(reaction_ids) // processes
-        with ProcessPool(
+        time_out_step = min(100, int((max_time_out-time_out)/2.))
+        failed_tasks = []
+        
+        with SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
                 initargs=(tuple([loop_model])),
         ) as pool:
-            for rxn_id, max_flux, min_flux in pool.imap_unordered(
-                    _find_loop_step, reaction_ids, chunksize=chunk_size
-            ):
-                if min_flux != 0. or max_flux != 0.:
-                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+            async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
+            for input_rxn, res in zip(reaction_ids, async_results):
+                try:
+                    res_tuple = res.get(timeout=time_out)
+                    rxn_id, max_flux, min_flux = res_tuple
+                    processed_rxns += 1
+                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                    if min_flux != 0. or max_flux != 0.:
+                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                except multiprocessing.TimeoutError:
+                    logger.warning(f"Find loops step timed out for rxn {input_rxn}")
+                    failed_tasks.append(input_rxn)
+            if failed_tasks:
+                time_out += time_out_step
+                time_out = min(max_time_out, time_out)
+                logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
+                while failed_tasks and time_out <= max_time_out:
+                    repeat_failed_tasks = []
+                    async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in failed_tasks]
+                    for input_rxn, res in zip(failed_tasks, async_results):
+                        try:
+                            res_tuple = res.get(timeout=time_out)
+                            rxn_id, max_flux, min_flux = res_tuple
+                            processed_rxns += 1
+                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                            if min_flux != 0. or max_flux != 0.:
+                                loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                        except multiprocessing.TimeoutError:
+                            logger.warning(f"FVA step timed out again for rxn {input_rxn}")
+                            repeat_failed_tasks.append(input_rxn)
+                    failed_tasks = repeat_failed_tasks
+                    time_out += time_out_step
+                logger.error(f"Find loops failed for several reactions:\n{failed_tasks}")
+                # Single core fallback
+                logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+                    processed_rxns += 1
+                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                    if min_flux != 0. or max_flux != 0.:
+                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
     else:
         _init_loop_worker(loop_model)
         for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+            processed_rxns += 1
+            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
             if min_flux != 0. or max_flux != 0.:
                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
 
-    loops_df = pd.DataFrame(loops)
+    loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
     return loops_df
+
+
+def replace_metabolite_stoichiometry(rxn, new_stoich):
+    """
+    This reaction allows for safely and reversibly assigning new reaction stoichiometry.
+    Assigning stoichiometry in add/subtract_metabolites method of cobrapy with combine set to False results in a
+    KeyError, if the metabolite was not previously part of the reaction. As with the cobrapy add/subtract_metabolites
+    method, the stoichiometry of metabolites that are not part of the new stoichiometry, are left unchanged.
+
+    Example: r1: a -> b; new_stoich: {c: -1}; => r1: a + c -> b
+    Example: r1: a -> b; new_stoich: {a: 0}; => r1: -> b
+
+    :param rxn: Target reaction
+    :param new_stoich: Dictionary with metabolites (string ID or cobra.Metabolite) as keys and floats as values.
+    """
+    stoich_to_subtract = {}
+    for k, v in rxn.metabolites.items():
+        if k.id in new_stoich.keys() or k in new_stoich.keys():
+            stoich_to_subtract[k] = v
+    rxn.subtract_metabolites(stoich_to_subtract, combine=True)
+    rxn.add_metabolites(new_stoich, combine=True)
+    return
+
+def find_incoherent_bounds(model):
+    """
+    Find incoherent bounds (lb > ub, bounds with NaN) and return them.
+    :param model: a cobrapy model
+    :return: A list of reactions with incoherent bounds. If none are found, returns an empty list
+    """
+    result = []
+    for rxn in model.reactions:
+        faulty_reaction = False
+        if np.isnan(rxn.lower_bound):
+            logger.info(f"Lower bound of reaction {rxn.id} is NaN!")
+            faulty_reaction = True
+        if np.isnan(rxn.upper_bound):
+            logger.info(f"Upper bound of reaction {rxn.id} is NaN!")
+            faulty_reaction = True
+        if rxn.lower_bound > rxn.upper_bound:
+            logger.info(f"Lower bound exceeds upper bound in reaction {rxn.id}!")
+            faulty_reaction = True
+        if faulty_reaction:
+            result.append(rxn)
+    return result

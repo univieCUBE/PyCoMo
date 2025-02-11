@@ -7,22 +7,19 @@ flux vector tables."""
 
 # IMPORT SECTION
 from typing import List, Union
-from .helper.utils import *
-from .helper.cli import *
-from .helper.multiprocess import *
 from math import isnan
+
+import cobra
 import libsbml
 import warnings
 import logging
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.info('Logger initialized.')
+from .helper.logger import *
+from .helper.utils import *
+from .helper.cli import *
+from .helper.multiprocess import *
+
+logger = logging.getLogger("pycomo")
 
 
 class SingleOrganismModel:
@@ -37,6 +34,8 @@ class SingleOrganismModel:
     :type name: str
     :param biomass_met: The biomass metabolite of the model
     :type biomass_met: class:`cobra.metabolite`
+    :param biomass_reaction: The biomass reaction of the model
+    :type biomass_reaction: class:`cobra.reaction`
     :param biomass_met_id: The ID of the biomass metabolite
     :type biomass_met_id: str
     :param prepared_model: The preprocessed model for merging
@@ -48,6 +47,7 @@ class SingleOrganismModel:
     name: str
     _original_name: str  # Used to make a conversion table at any point
     biomass_met: cobra.Metabolite = None
+    biomass_reaction: cobra.Reaction = None
     biomass_met_id: str = None
     prepared_model: cobra.Model = None
     shared_compartment_name = None
@@ -69,7 +69,8 @@ class SingleOrganismModel:
         self._original_name = name
         self.name = make_string_sbml_id_compatible(name, remove_ascii_escapes=True)
         if name != self.name:
-            logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
+            logger.warning(
+                f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         self.biomass_met_id = biomass_met_id
         self._name_via_annotation = name_via_annotation
         self.shared_compartment_name = shared_compartment_name
@@ -298,19 +299,20 @@ class SingleOrganismModel:
         comp_mets = model.metabolites.query(lambda x: x.compartment == exchg_comp)
         exchg_mets = [list(rxn.metabolites)[0] for rxn in model.exchanges]
         mets_without_exchg = list((set(comp_mets) - set(exchg_mets)) - {self.biomass_met})
+        logger.debug(f"Metabolites in exchange compartment without exchange reactions: {mets_without_exchg}")
         return mets_without_exchg
 
-    def convert_exchange_to_transport_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
+    def convert_exchange_to_transfer_reaction(self, model, old_comp, inplace=True, max_flux=1000.):
         """
         When preprocessing the model for merging into a community metabolic model, a new shared compartment is added.
         This new compartment will be the compartment for boundary metabolites, containing all metabolites with exchange
-        reactions. The previous boundary metabolites should then have their exchange reactions converted into transport
+        reactions. The previous boundary metabolites should then have their exchange reactions converted into transfer
         reactions, which transfer the metabolites into the new, shared compartment.
 
         :param model: The model to be changed
         :param old_comp: The ID of the old exchange compartment
         :param inplace: If True, the input model will be changed, else a copy is made
-        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transport reactions)
+        :param max_flux: The maximum allowed flux in the model (used to open the constraints of the transfer reactions)
         :return: None if the inplace flag is set, otherwise the model with changed reactions
         """
         if not inplace:
@@ -319,9 +321,9 @@ class SingleOrganismModel:
         for rxn in model.exchanges:
             rxn_string = rxn.id
             if old_comp in rxn_string and old_comp == rxn_string[-len(old_comp):]:
-                # Replace the exchange reaction term with TP_
+                # Replace the exchange reaction term with TF_
                 if "EX_" in rxn.id:
-                    rxn.id = rxn.id.replace("EX_", "TP_")
+                    rxn.id = rxn.id.replace("EX_", "TF_")
                 # Remove the SBO term for exchange reaction
                 if "sbo" in rxn.annotation and "SBO:0000627" in rxn.annotation["sbo"]:
                     rxn.annotation.pop("sbo")
@@ -331,7 +333,7 @@ class SingleOrganismModel:
                     new_met_stoich[model.metabolites.get_by_id(self._exchange_met_name_conversion[met.id])] = -stoich
                 rxn.add_metabolites(new_met_stoich)
                 if "Exchange" in rxn.name:
-                    rxn.name = rxn.name.replace("Exchange", "Transport")
+                    rxn.name = rxn.name.replace("Exchange", "Transfer")
                 rxn.bounds = (-max_flux, max_flux)
 
         model.repair()
@@ -421,16 +423,16 @@ class SingleOrganismModel:
 
         return model
 
-    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transports=False, inplace=True,
+    def add_exchange_compartment(self, model, exchg_comp_name=None, add_missing_transfers=False, inplace=True,
                                  max_flux=1000.):
         """
         Add a new exchange compartment. This will also copy all metabolites in the current external compartment to the
-        exchange compartment, establish transport reactions between the two compartments for all metabolites and add
+        exchange compartment, establish transfer reactions between the two compartments for all metabolites and add
         new exchange reactions for all copied metabolites.
 
         :param model: Model to be changed
         :param exchg_comp_name: Name of the new exchange compartment
-        :param add_missing_transports: If True, add exchange reactions and transport reactions for all metabolites in
+        :param add_missing_transfers: If True, add exchange reactions and transfer reactions for all metabolites in
             the old external compartment that did not have any exchange reactions
         :param inplace: If True, the input model will be changed, else a copy is made
         :param max_flux: Maximum allowed flux
@@ -444,11 +446,11 @@ class SingleOrganismModel:
         old_exc_comp = cobra.medium.find_external_compartment(model)
         # Add metabolites
         self.add_boundary_metabolites_to_exchange_compartment(model, new_comp=exchg_comp_name, inplace=True)
-        # Add transport reactions
-        if add_missing_transports:
+        # Add transfer reactions
+        if add_missing_transfers:
             mets_without_exchg = self.find_metabolites_without_exchange_rxn(model)
             self.add_exchange_reactions_to_metabolites(model, mets_without_exchg, inplace=True)
-        self.convert_exchange_to_transport_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
+        self.convert_exchange_to_transfer_reaction(model, old_exc_comp, inplace=True, max_flux=max_flux)
         # Add exchange reactions
         self.add_exchange_reactions_to_compartment(model, exchg_comp_name, inplace=True)
 
@@ -535,11 +537,47 @@ class SingleOrganismModel:
         :return: None
         """
         for reaction in self.biomass_met.reactions:
+            if reaction == self.biomass_rxn:
+                continue
             if reaction in model.exchanges:
                 reaction.remove_from_model()
             elif remove_all_consuming_rxns and self.biomass_met in reaction.reactants:
                 reaction.remove_from_model(remove_orphans=True)
         return
+
+    def handle_boundary_biomass_reaction(self):
+        """
+        Checks if identified biomass reaction is a boundary reaction. If so, replace the boundary prefix from the
+        reaction ID (EX, SK, DM). Also removes the SBO term associated with the boundary reaction. In case only a
+        single reactant is present (which is expected), the reactant is moved from the boundary compartment into the
+        'bio' compartment, to avoid further boundary reactions being added to it.
+        """
+        if self.biomass_rxn is None:
+            logger.info("No biomass reaction identified, skipping handling of boundary biomass reactions")
+            return
+        if self.model.reactions.get_by_id(self.biomass_rxn.id) in self.model.boundary:
+            logger.info(f"Biomass reaction {self.biomass_rxn.id} is a boundary reaction.")
+            # Remove the SBO term for exchange reaction
+            if "sbo" in self.biomass_rxn.annotation and "SBO:0000627" in self.biomass_rxn.annotation["sbo"]:
+                self.biomass_rxn.annotation.pop("sbo")
+            biomass_reactants = self.biomass_rxn.reactants
+            if len(biomass_reactants) == 1:
+                # Move biomass metabolite out of boundary compartment
+                logger.info(f"Moving reactant {biomass_reactants[0]} out of the boundary compartment into compartment "
+                            f"'bio', to avoid further boundary reactions being added to it.")
+                biomass_reactants[0].compartment = "bio"
+            elif len(biomass_reactants) == 0:
+                logger.warning(f"Biomass reaction {self.biomass_rxn.id} has no reactants!")
+            elif len(biomass_reactants) > 1:
+                logger.warning(f"Biomass reaction {self.biomass_rxn.id} is a boundary reaction with more than 1 "
+                               f"reactant!")
+            # Rename biomass reaction ID
+            if "EX_" in self.biomass_rxn.id:
+                self.biomass_rxn.id = self.biomass_rxn.id.replace("EX_", "bio_")
+            elif "SK_" in self.biomass_rxn.id:
+                self.biomass_rxn.id = self.biomass_rxn.id.replace("SK_", "bio_")
+            elif "DM_" in self.biomass_rxn.id:
+                self.biomass_rxn.id = self.biomass_rxn.id.replace("DM_", "bio_")
 
     def prepare_for_merging(self, shared_compartment_name=None, max_flux=1000.):
         """
@@ -560,8 +598,16 @@ class SingleOrganismModel:
         if shared_compartment_name is not None:
             self.shared_compartment_name = shared_compartment_name
         self.prepared_model = self.model.copy()
-        self.biomass_met = get_model_biomass_compound(self.prepared_model, self.shared_compartment_name,
-                                                      generate_if_none=True)
+        biomass_met, biomass_rxn = get_model_biomass_compound(self.prepared_model,
+                                                              self.shared_compartment_name,
+                                                              generate_if_none=True,
+                                                              return_biomass_rxn=True)
+        self.biomass_met = biomass_met
+        self.biomass_rxn = biomass_rxn
+
+        # Handle case where the biomass reaction is a boundary reaction
+        self.handle_boundary_biomass_reaction()
+
         self.remove_biomass_exchange_rxn(self.prepared_model)
 
         # Remove ascii escape characters from sbml ids, as they are not compatible
@@ -574,7 +620,7 @@ class SingleOrganismModel:
         for comp in self.prepared_model.compartments:
             rename[comp] = self.name + "_" + comp
         self.rename_compartment(self.prepared_model, rename)
-        self.add_exchange_compartment(self.prepared_model, add_missing_transports=True, max_flux=max_flux)
+        self.add_exchange_compartment(self.prepared_model, add_missing_transfers=True, max_flux=max_flux)
         self.prefix_metabolite_names(self.prepared_model, self.name + "_",
                                      exclude_compartment=self.shared_compartment_name)
         self.prefix_reaction_names(self.prepared_model, self.name + "_",
@@ -614,9 +660,12 @@ class CommunityModel:
     fixed_growth_rate_flag: bool = False
     max_flux: float = 1000.
     shared_compartment_name: str = None
+    no_annotation_overlap: list = None
     _dummy_metabolite_scaling_factor = 0.01
     _f_metabolites: list = None
     _f_reactions: list = None
+    _transfer_reactions: list = None
+    _transport_reactions: list = None
     _model: cobra.Model = None
     _medium: dict = None
     _merge_via_annotation: str = None
@@ -640,6 +689,7 @@ class CommunityModel:
         self.member_models = models
         self.mu_c = mu_c
         self.shared_compartment_name = shared_compartment_name
+        self.no_annotation_overlap = []
 
         if models is not None:
             model_names = [model.name for model in self.member_models]
@@ -658,13 +708,19 @@ class CommunityModel:
         if max_flux > 0.:
             self.max_flux = max_flux
         else:
-            logger.warning(f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
-                  f"instead.")
+            logger.warning(
+                f"Warning: maximum flux value is not greater than 0 ({max_flux}). Using default value of 1000.0 "
+                f"instead.")
             self.max_flux = 1000.
+
+        if len(name) == 0:
+            name = "Community_Model"
+            logger.warning(f"Warning: No name was given for the CommunityModel. Name is set to {name}")
 
         self.name = make_string_sbml_id_compatible(name)
         if name != self.name:
-            logger.warning(f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
+            logger.warning(
+                f"Warning: model name {name} is not compliant with sbml id standards and was changed to {self.name}")
         if merge_via_annotation is not None:
             self._merge_via_annotation = merge_via_annotation
             for model in self.member_models:
@@ -710,6 +766,7 @@ class CommunityModel:
         :return: The community metabolic model (COBRApy model object)
         """
         if self._model is None:
+            self.no_annotation_overlap = []
             logger.info(f"No community model generated yet. Generating now:")
             self.generate_community_model()
             logger.info(f"Generated community model.")
@@ -762,6 +819,56 @@ class CommunityModel:
         return self._f_reactions
 
     @property
+    def transport_reactions(self):
+        """
+        A list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        return self._transfer_reactions
+
+    @transport_reactions.getter
+    def transport_reactions(self):
+        """
+        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        self._transport_reactions = self.model.reactions.query(
+            lambda x: self.is_transporter(x))
+        if self._transport_reactions is None:
+            self._transport_reactions = []
+        return self._transport_reactions
+
+    @property
+    def transfer_reactions(self):
+        """
+        A list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        return self._transfer_reactions
+
+    @transfer_reactions.getter
+    def transfer_reactions(self):
+        """
+        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+
+        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        """
+        f_reactions = self.f_reactions
+        transport_rxns = self.transport_reactions
+        self._transfer_reactions = self.model.reactions.query(
+            lambda x: x not in f_reactions
+                      and x not in transport_rxns
+                      and len(x.compartments) == 3
+                      and "fraction_reaction" in x.compartments
+                      and self.shared_compartment_name in x.compartments)
+        if self._transfer_reactions is None:
+            self._transfer_reactions = []
+        return self._transfer_reactions
+
+    @property
     def medium(self):
         """
         The medium of the community metabolic model
@@ -780,7 +887,7 @@ class CommunityModel:
         """
         if self._medium is None:
             raise ValueError("Error: No medium set for this community model.\nPlease set the medium with "
-                                 ".load_medium_from_file('/path/to/medium_file.csv')")
+                             ".load_medium_from_file('/path/to/medium_file.csv')")
         return self._medium
 
     @medium.setter
@@ -799,8 +906,28 @@ class CommunityModel:
         if not all([isinstance(value, float) for value in medium_dict.values()]):
             raise TypeError("Medium values must be floats!")
         self._medium = medium_dict
+        self.apply_medium()
 
-    def summary(self, suppress_f_metabolites=True):
+    def is_transporter(self, rxn):
+        if rxn in self.f_reactions:
+            # Fraction reactions are not transporters
+            return False
+        met_comps = [met.compartment for met in rxn.metabolites.keys() if met.compartment != "fraction_reaction"]
+        if self.shared_compartment_name in met_comps:
+            # Transporters operate within a single organism.
+            # Exchange of metabolites between the shared compartment and the members is handled by transfer reactions.
+            return False
+        if len(set(met_comps)) < 2:
+            # Transporters need to operate within at least 2 compartments
+            return False
+        for n in self.get_member_names():
+            # Transporters need to operate within compartments of
+            # the same member (excluding the fraction_reaction compartment)
+            if n in rxn.id and all([n in m for m in met_comps]):
+                return True
+        return False
+
+    def summary(self, suppress_f_metabolites=True, catch_infeasible=False):
         """
         Calls and returns the summary method of community metabolic model. Dummy metabolites and reactions can be
         excluded from the flux report by setting the suppress_f_metabolites flag.
@@ -808,20 +935,27 @@ class CommunityModel:
         :param suppress_f_metabolites: If true, excludes dummy metabolites and reactions from the flux report
         :return: The COBRApy summary object of the community metabolic model
         """
-        summary = self.model.summary()
+        try:
 
-        if suppress_f_metabolites:
-            model = self.model
-            new_secretion_flux_rows = []
-            old_secretion_flux = summary.secretion_flux
-            for idx, row in old_secretion_flux.iterrows():
-                if model.metabolites.get_by_id(row["metabolite"]).compartment != "fraction_reaction":
-                    new_secretion_flux_rows.append(row)
+            summary = self.model.summary()
 
-            new_secretion_flux = pd.DataFrame(new_secretion_flux_rows)
-            summary.secretion_flux = new_secretion_flux
+            if suppress_f_metabolites:
+                model = self.model
+                new_secretion_flux_rows = []
+                old_secretion_flux = summary.secretion_flux
+                for idx, row in old_secretion_flux.iterrows():
+                    if model.metabolites.get_by_id(row["metabolite"]).compartment != "fraction_reaction":
+                        new_secretion_flux_rows.append(row)
 
-        return summary
+                new_secretion_flux = pd.DataFrame(new_secretion_flux_rows)
+                summary.secretion_flux = new_secretion_flux
+
+            return summary
+        except cobra.exceptions.Infeasible as e:
+            if catch_infeasible:
+                return "Infeasible!"
+            else:
+                raise e
 
     def generate_member_name_conversion_dict(self):
         """
@@ -999,15 +1133,12 @@ class CommunityModel:
                                                                                              merged_model)
                 for met_id in unbalanced_metabolites:
                     met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    logger.warning(f"WARNING: matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
-                          f"Please manually curate this metabolite for a mass and charge balanced model!")
+                    logger.warning(
+                        f"Matching of the metabolite {met_base_name} is unbalanced (mass and/or charge). "
+                        f"Please manually curate this metabolite for a mass and charge balanced model!")
                 no_annotation_overlap = check_annotation_overlap_of_metabolites_with_identical_id(extended_model,
                                                                                                   merged_model)
-                for met_id in no_annotation_overlap:
-                    met_base_name = get_metabolite_id_without_compartment(extended_model.metabolites.get_by_id(met_id))
-                    logger.warning(f"WARNING: no annotation overlap found for matching metabolite {met_base_name}. "
-                          f"Please make sure that the metabolite with this ID is indeed representing the same substance"
-                          f" in all models!")
+                self.no_annotation_overlap.extend(no_annotation_overlap)
 
                 biomass_met_id = model.biomass_met.id
 
@@ -1018,8 +1149,17 @@ class CommunityModel:
                 extended_model.add_reactions([rxn])
                 self.create_fraction_reaction(extended_model, member_name=model.name)
 
-                merged_model.merge(extended_model)
+                regex_filter_cobra = RegexFilter(r"Ignoring")
+
+                with temporary_logger_filter("cobra.core.model", regex_filter_cobra):
+                    merged_model.merge(extended_model)
                 biomass_mets[model.name] = merged_model.metabolites.get_by_id(biomass_met_id)
+
+        if len(self.no_annotation_overlap) > 0:
+            logger.warning(f"No annotation overlap found for matching several metabolites "
+                           f"({len(self.no_annotation_overlap)}). Please make sure that the matched metabolites "
+                           f"are indeed representing the same substance in all models! The list of metabolites"
+                           f"without annotation overlap can be accessed via 'model.no_annotation_overlap'")
 
         self.fixed_growth_rate_flag = True
         self.fixed_abundance_flag = False
@@ -1034,7 +1174,7 @@ class CommunityModel:
         # create additional reactions for each biomass reaction of a suborganism
         for member, met in biomass_mets.items():
             rxn = merged_model.reactions.get_by_id(f"{member}_to_community_biomass")
-            rxn.add_metabolites({met: -1, biomass_met: 1}, combine=False)
+            replace_metabolite_stoichiometry(rxn, {met: -1, biomass_met: 1})
         # set mu_c for the community, default = 1
         self.apply_fixed_growth_rate(self.mu_c, merged_model)
 
@@ -1054,7 +1194,7 @@ class CommunityModel:
 
         if not self.is_mass_balanced():
             logger.warning(
-                "WARNING: Not all reactions in the model are mass and charge balanced. To check which reactions are "
+                "Not all reactions in the model are mass and charge balanced. To check which reactions are "
                 "imbalanced, please run the get_unbalanced_reactions method of this CommunityModel object")
 
         return merged_model
@@ -1184,18 +1324,18 @@ class CommunityModel:
         if lower_bound != 0:
             coefficient = -self.max_flux if lower_bound < -self.max_flux else lower_bound
             fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
-            reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_lb: self._dummy_metabolite_scaling_factor})
         else:
-            reaction.add_metabolites({met_lb: 0}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_lb: 0})
             fraction_reaction_mets[met_lb] = 0
 
         if upper_bound != 0:
             coefficient = self.max_flux if upper_bound > self.max_flux else upper_bound
             fraction_reaction_mets[met_ub] = coefficient * self._dummy_metabolite_scaling_factor
-            reaction.add_metabolites({met_ub: -self._dummy_metabolite_scaling_factor}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_ub: -self._dummy_metabolite_scaling_factor})
         else:
             fraction_reaction_mets[met_ub] = 0
-            reaction.add_metabolites({met_ub: 0}, combine=False)
+            replace_metabolite_stoichiometry(reaction, {met_ub: 0})
 
         # Relax reaction bounds
         if lower_bound < 0:
@@ -1208,7 +1348,7 @@ class CommunityModel:
             reaction.upper_bound = self.max_flux
 
         # Add fraction metabolites to the fraction reaction
-        fraction_reaction.add_metabolites(fraction_reaction_mets, combine=False)
+        replace_metabolite_stoichiometry(fraction_reaction, fraction_reaction_mets)
 
         # Add sink reactions for fraction mets
         self.add_sink_reactions_to_metabolites(model, metabolites_needing_sink_reactions)
@@ -1277,14 +1417,11 @@ class CommunityModel:
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
                 fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
+                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: flux})
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
                 self.model.add_metabolites(fraction_met)
-                if fraction_met in fraction_rxn.metabolites:
-                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=False)
-                else:
-                    fraction_rxn.add_metabolites({fraction_met: flux}, combine=True)
+                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: flux})
 
         model.repair()
 
@@ -1323,12 +1460,12 @@ class CommunityModel:
             fraction_rxn = model.reactions.get_by_id(f"{member_name}_fraction_reaction")
             try:
                 fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
-                fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: 0})
             except KeyError:
                 fraction_met = self._backup_metabolites[f"{member_name}_f_biomass_met"]
                 if fraction_met in fraction_rxn.metabolites:
                     self.model.add_metabolites(fraction_met)
-                    fraction_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                    replace_metabolite_stoichiometry(fraction_rxn, {fraction_met: 0})
 
         # Activate the source reaction for coupled f_bio metabolites, constrained to the abundance
         model.reactions.get_by_id("abundance_reaction").bounds = (0., self.max_flux)
@@ -1357,8 +1494,9 @@ class CommunityModel:
         (check fixed_abundance_flag).
         """
         if not self.fixed_abundance_flag:
-            logger.error("Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
-                  "Convert the model to fixed abundance structure first.")
+            logger.error(
+                "Error: the model is not in fixed abundance structure, but fixed abundance was tried to be applied. "
+                "Convert the model to fixed abundance structure first.")
             return
 
         # Check if organism names are in the model
@@ -1369,11 +1507,13 @@ class CommunityModel:
             raise ValueError(err_msg)
 
         # Check that abundances sum to 1
+        logger.debug(f"Checking if the sum of abundances is 1: {abd_dict}")
         if not np.isclose([sum(abd_dict.values())], [1.]):
-            logger.warning(f"Warning: Abundances do not sum up to 1. Correction will be applied")
+            logger.warning(f"Warning: Abundances do not sum up to 1. Correction will be applied: {abd_dict}")
             if sum(abd_dict.values()) == 0.:
                 logger.error(f"Error: The sum of abundances is 0")
                 raise ValueError
+            logger.debug("Applying abundance correction")
             correction_factor = 1 / sum(abd_dict.values())
             for name, abundance in abd_dict.items():
                 new_abundance = abundance * correction_factor
@@ -1384,15 +1524,22 @@ class CommunityModel:
             if np.isnan(list(abd_dict.values())).any():
                 raise ValueError(f"Abundances contain NaN values: {abd_dict}")
 
+        logger.debug("Extending abundances to include all organisms")
         # Extend abundances to include all organisms of model
         for name in self.get_member_names():
             if name not in abd_dict.keys():
                 abd_dict[name] = 0.
 
         # Apply the abundance as ratios of f_biomass metabolites
+        logger.debug(f"Applying abundances to model. Final abundances: {abd_dict}")
         model = self.model
         abd_rxn_mets = {}
         for member_name, fraction in abd_dict.items():
+            if fraction < cobra.Configuration().tolerance and fraction != 0.:
+                logger.warning(f"Abundance of {member_name} is lower than the solver tolerance:" 
+                               f"{fraction} < {cobra.Configuration().tolerance}. "
+                               f"This can lead to problems with the solver!")
+            logger.debug(f"Setting abundance for {member_name}")
             try:
                 f_bio_met = model.metabolites.get_by_id(f'{member_name}_f_biomass_met')
             except KeyError:
@@ -1401,8 +1548,10 @@ class CommunityModel:
             f_rxn.bounds = (0., fraction)
             abd_rxn_mets[f_bio_met] = fraction
 
+        logger.debug("Getting abundance reaction")
         abd_rxn = model.reactions.get_by_id("abundance_reaction")
-        abd_rxn.add_metabolites(abd_rxn_mets, combine=False)
+        logger.debug("Setting abundance reaction")
+        replace_metabolite_stoichiometry(abd_rxn, abd_rxn_mets)
 
         self._abundance_dict = abd_dict
 
@@ -1490,20 +1639,20 @@ class CommunityModel:
                     if "_lb" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.lower_bound = -coeff / self._dummy_metabolite_scaling_factor
-                        rxn.add_metabolites({metabolite: 0}, combine=False)
-                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
+                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
                         metabolite.remove_from_model(True)
                     elif "_ub" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.upper_bound = coeff / self._dummy_metabolite_scaling_factor
-                        rxn.add_metabolites({metabolite: 0}, combine=False)
-                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
+                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
                         metabolite.remove_from_model(True)
                     elif "_f_biomass_met" in metabolite.id:
                         rxn = model.reactions.get_by_id(
                             metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
-                        rxn.add_metabolites({metabolite: 0}, combine=False)
-                        reaction.add_metabolites({metabolite: 0}, combine=False)
+                        replace_metabolite_stoichiometry(rxn, {metabolite: 0})
+                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
                         metabolite.remove_from_model(True)
 
         for reaction in reactions_to_remove:
@@ -1525,12 +1674,18 @@ class CommunityModel:
         medium_dict = read_medium_from_file(file_path, comp=f"_{self.shared_compartment_name}")
         self.medium = medium_dict
 
-    def apply_medium(self):
+    def apply_medium(self, medium=None):
         """
         Applies the medium that is specified in the medium attribute to the community metabolic model
 
+        :param medium: Optional. A dictionary with exchange reaction IDs as keys and the maximum
+            flux of the respective metabolite as value. If none is given, the medium in self.medium is applied.
         :return: The updated model
         """
+
+        if medium is not None:
+            self.medium = medium
+
         test_if_medium_exists = self.medium
         medium_model = self.model
         # Exclude metabolites from the medium that are not part of the model
@@ -1548,6 +1703,7 @@ class CommunityModel:
 
         self._model = medium_model
         self.medium_flag = True
+        self.model.reactions.abundance_reaction.bounds = 0.,1000.
         return medium_model
 
     def run_fba(self):
@@ -1612,30 +1768,48 @@ class CommunityModel:
         :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
         """
+        logger.debug(f"Starting run FVA with parameters:\n\t"
+                     f"fraction_of_optimum: {fraction_of_optimum}\n\t"
+                     f"composition_agnostic: {composition_agnostic}\n\t"
+                     f"loopless: {loopless}\n\t"
+                     f"fva_mu_c: {fva_mu_c}\n\t"
+                     f"only_exchange_reactions: {only_exchange_reactions}\n\t"
+                     f"reactions: {reactions}\n\t"
+                     f"verbose: {verbose}\n\t"
+                     f"processes: {processes}\n\t")
         model = self.model
 
         if fva_mu_c is None and composition_agnostic:
+            logger.debug(f"Setting fva_mu_c to 0 and fraction_of_optimum to 0")
             fva_mu_c = 0.
             fraction_of_optimum = 0.
         elif fva_mu_c is not None:
+            logger.debug("Setting fraction_of_optimum to 1")
             fraction_of_optimum = 1.
 
         if only_exchange_reactions:
             if verbose:
                 logger.info(f"Setting reactions to be analysed to exchange reactions only")
+            else:
+                logger.debug("Setting reactions to be analysed to exchange reactions only")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
             if verbose:
                 logger.info(f"Setting reactions to be analysed to all non-fraction-reactions")
+            else:
+                logger.debug("Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
         if fva_mu_c is not None:
+            logger.debug(f"fva_mu_c is not None: {fva_mu_c}")
             f_bio_mets = {}
             if self.fixed_growth_rate_flag:
+                logger.debug(f"Model is in fixed growth rate")
                 mu_c = self.mu_c
                 self.apply_fixed_growth_rate(fva_mu_c)
                 if composition_agnostic:
+                    logger.debug("Prepare model for composition agnostic run")
                     # Allow flux through the biomass reaction
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=self.max_flux)
                     # Uncouple the biomass flux from the fraction reactions. This allows a model structure where member
@@ -1645,11 +1819,13 @@ class CommunityModel:
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
                         f_bio_mets[member_name] = fraction_met
-                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                        replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
 
                 if loopless:
                     if verbose:
                         logger.info(f"Running loopless FVA")
+                    else:
+                        logger.debug("Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
                                                     use_loop_reactions_for_ko=True,
@@ -1658,12 +1834,14 @@ class CommunityModel:
                 else:
                     if verbose:
                         logger.info(f"Running FVA")
-                    solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                            reactions,
-                                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                                            loopless=False,
-                                                                                            processes=processes)
+                    else:
+                        logger.debug("Running FVA")
+                    solution_df = fva(self,
+                                      reactions,
+                                      fraction_of_optimum=fraction_of_optimum,
+                                      processes=processes)
 
+                logger.debug("FVA finished!")
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1686,7 +1864,7 @@ class CommunityModel:
                         biomass_rxn = model.reactions.get_by_id(f"{member_name}_to_community_biomass")
                         fraction_met = model.metabolites.get_by_id(f"{member_name}_f_biomass_met")
                         f_bio_mets[member_name] = fraction_met
-                        biomass_rxn.add_metabolites({fraction_met: 0}, combine=False)
+                        replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
 
                 if loopless:
                     if verbose:
@@ -1699,11 +1877,10 @@ class CommunityModel:
                 else:
                     if verbose:
                         logger.info(f"Running FVA")
-                    solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                            reactions,
-                                                                                            fraction_of_optimum=fraction_of_optimum,
-                                                                                            loopless=False,
-                                                                                            processes=processes)
+                    solution_df = fva(self,
+                                      reactions,
+                                      fraction_of_optimum=fraction_of_optimum,
+                                      processes=processes)
                 # Revert changes
                 if composition_agnostic:
                     self.change_reaction_bounds("community_biomass", lower_bound=0., upper_bound=0.)
@@ -1713,9 +1890,12 @@ class CommunityModel:
 
                 self.convert_to_fixed_abundance()
         else:
+            logger.debug(f"fva_mu_c is None: {fva_mu_c}")
             if loopless:
                 if verbose:
                     logger.info(f"Running loopless FVA")
+                else:
+                    logger.debug(f"Running loopless FVA")
                 solution_df = self.loopless_fva(reactions,
                                                 fraction_of_optimum=fraction_of_optimum,
                                                 use_loop_reactions_for_ko=True,
@@ -1724,11 +1904,13 @@ class CommunityModel:
             else:
                 if verbose:
                     logger.info(f"Running FVA")
-                solution_df = cobra.flux_analysis.variability.flux_variability_analysis(self.model,
-                                                                                        reactions,
-                                                                                        fraction_of_optimum=fraction_of_optimum,
-                                                                                        loopless=False,
-                                                                                        processes=processes)
+                else:
+                    logger.debug(f"Running FVA")
+                solution_df = fva(self,
+                                  reactions,
+                                  fraction_of_optimum=fraction_of_optimum,
+                                  processes=processes)
+            logger.debug("FVA finished")
 
         solution_df.insert(loc=0, column='reaction', value=list(solution_df.index))
         solution_df.columns = ["reaction_id", "min_flux", "max_flux"]
@@ -1760,11 +1942,12 @@ class CommunityModel:
             solution_df.to_csv(file_path, sep="\t", header=True, index=False, float_format='%f')
         return solution_df
 
-    def cross_feeding_metabolites_from_fba(self):
+    def cross_feeding_metabolites_from_fba(self, return_flux_vector=False):
         """
         Run flux balance analysis and convert the solution flux vector into a table of metabolites, including the
         solution flux for the exchange reaction of each metabolite for every community member.
 
+        :param return_flux_vector: If True, return the flux vector from FBA output as well
         :return: A dataframe of the solution flux for the exchange reaction of each metabolite for every community
             member
         """
@@ -1776,15 +1959,20 @@ class CommunityModel:
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
+        transfer_reactions = self.transfer_reactions
         for exchg_met in exchg_metabolites:
-            # Check flux of transport ("_TP_") reactions to organism
+            # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name}
             for name in member_names:
                 row_dict[name] = 0.
             for rxn in exchg_met.reactions:
-                if "_TP_" not in rxn.id:
+                if rxn not in transfer_reactions:
                     continue
-                rxn_member = rxn.id.split("_TP_")[0]
+                rxn_member = ""
+                for member in self.get_member_names():
+                    if len(member) <= len(rxn.id) and member in rxn.id[:len(member)]:
+                        rxn_member = member
+                        break
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
@@ -1793,15 +1981,23 @@ class CommunityModel:
                 row_dict[rxn_member] = 0. if close_to_zero(flux) else flux
             rows.append(row_dict)
 
-        exchg_metabolite_df = pd.DataFrame(rows)
+        exchg_metabolite_df = pd.DataFrame(rows,
+                                           columns=["metabolite_id", "metabolite_name"].extend(list(member_names))
+                                           )
         cross_feeding_metabolites = exchg_metabolite_df.copy()
         cross_feeding_metabolites.drop(columns=["metabolite_id", "metabolite_name"], inplace=True)
         cross_feeding_mask = cross_feeding_metabolites.apply(lambda x: any(x > 0.) and any(x < 0.), axis=1)
         exchg_metabolite_df["cross_feeding"] = cross_feeding_mask
+        if return_flux_vector:
+            return exchg_metabolite_df, solution_df
         return exchg_metabolite_df
 
     def cross_feeding_metabolites_from_fva(self, fraction_of_optimum=0.,
-                                           composition_agnostic=False, fva_mu_c=None, loopless=True, processes=None):
+                                           composition_agnostic=False,
+                                           fva_mu_c=None,
+                                           loopless=True,
+                                           processes=None,
+                                           return_flux_vector=False):
         """
         Run flux variability analysis and convert the solution flux ranges into a table of metabolites, including the
         solution flux ranges for the exchange reaction of each metabolite for every community member.
@@ -1812,6 +2008,7 @@ class CommunityModel:
         :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
         :param loopless: Run loopless FVA
         :param processes: The number of processes to use
+        :param return_flux_vector: If True, return the flux vector from FVA output as well
         :return: A dataframe of the solution flux range for the exchange reaction of each metabolite for every community
             member
         """
@@ -1826,16 +2023,26 @@ class CommunityModel:
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
         member_names = self.get_member_names()
 
+        columns = ["metabolite_id", "metabolite_name", "cross_feeding"]
+        for name in member_names:
+            columns.append(name + "_min_flux")
+            columns.append(name + "_max_flux")
+
+        transfer_reactions = self.transfer_reactions
         for exchg_met in exchg_metabolites:
-            # Check flux of transport ("_TP_") reactions to organism
+            # Check flux of transfer ("_TF_") reactions to organism
             row_dict = {"metabolite_id": exchg_met.id, "metabolite_name": exchg_met.name, "cross_feeding": False}
             for name in member_names:
                 row_dict[name + "_min_flux"] = 0.
                 row_dict[name + "_max_flux"] = 0.
             for rxn in exchg_met.reactions:
-                if "_TP_" not in rxn.id:
+                if rxn not in transfer_reactions:
                     continue
-                rxn_member = rxn.id.split("_TP_")[0]
+                rxn_member = ""
+                for member in self.get_member_names():
+                    if len(member) <= len(rxn.id) and member in rxn.id[:len(member)]:
+                        rxn_member = member
+                        break
                 if rxn_member not in member_names:
                     raise ValueError(f"Community member extracted from reaction is not part of the model")
                 if rxn.id not in set(solution_df["reaction_id"]):
@@ -1853,8 +2060,9 @@ class CommunityModel:
             row_dict["cross_feeding"] = interaction
             rows.append(row_dict)
 
-        exchg_metabolite_df = pd.DataFrame(rows)
-
+        exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
+        if return_flux_vector:
+            return exchg_metabolite_df, solution_df
         return exchg_metabolite_df
 
     def format_exchg_rxns(self, exchg_metabolite_df):
@@ -1883,7 +2091,10 @@ class CommunityModel:
                     if row[member + "_max_flux"] > 0.:
                         row_dict["produced_by"].append(member)
             rows.append(row_dict)
-        exchg_metabolite_df = pd.DataFrame(rows)
+
+        columns = ["metabolite_id", "metabolite_name", "cross_feeding", "produced_by", "consumed_by"]
+
+        exchg_metabolite_df = pd.DataFrame(rows, columns=columns)
 
         return exchg_metabolite_df
 
@@ -1891,8 +2102,10 @@ class CommunityModel:
                                        fba=False,
                                        composition_agnostic=True,
                                        fva_mu_c=None,
+                                       fraction_of_optimum=0.,
                                        loopless=True,
-                                       processes=None):
+                                       processes=None,
+                                       return_flux_vector=False):
         """
         Calculates all potentially exchanged metabolites between the community members. This can be done via flux
         balance analysis or flux variability analysis.
@@ -1901,24 +2114,32 @@ class CommunityModel:
         :param composition_agnostic: Removes constrains set by fixed growth rate or fixed abundance. This also allows
             solutions without balanced growth, i.e. different growth rate of community members.
         :param fva_mu_c: Set a temporary community growth rate for the analysis (only FVA).
+        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached (only FVA)
         :param loopless: Run loopless FVA
         :param processes: The number of processes to use (only FVA)
+        :param return_flux_vector: If True, return the flux vector from FBA/FVA output as well
         :return: A dataframe of which metabolites are cross-fed, taken up or secreted by each community member
         """
-        # TODO: give the option to return the flux vector
-        if fba:
-            exchange_df = self.cross_feeding_metabolites_from_fba()
-        elif composition_agnostic:
-            exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=None,
-                                                                  composition_agnostic=True,
-                                                                  loopless=loopless,
-                                                                  processes=processes)
-        else:
-            exchange_df = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1., fva_mu_c=fva_mu_c,
-                                                                  composition_agnostic=False,
-                                                                  loopless=loopless,
-                                                                  processes=processes)
 
+        if fba:
+            exchange_df, flux_vector = self.cross_feeding_metabolites_from_fba(return_flux_vector=True)
+        elif composition_agnostic:
+            exchange_df, flux_vector = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=1.,
+                                                                               fva_mu_c=None,
+                                                                               composition_agnostic=True,
+                                                                               loopless=loopless,
+                                                                               processes=processes,
+                                                                               return_flux_vector=True)
+        else:
+            exchange_df, flux_vector = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=fraction_of_optimum,
+                                                                               fva_mu_c=fva_mu_c,
+                                                                               composition_agnostic=False,
+                                                                               loopless=loopless,
+                                                                               processes=processes,
+                                                                               return_flux_vector=True)
+
+        if return_flux_vector:
+            return self.format_exchg_rxns(exchange_df), flux_vector
         return self.format_exchg_rxns(exchange_df)
 
     def report(self, verbose=True, max_reactions=5000):
@@ -1955,8 +2176,9 @@ class CommunityModel:
             reactions_in_loops = self.get_loops()
             num_loop_reactions = len(reactions_in_loops)
         else:
-            logger.info(f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
-                  f"would take some time. If needed, please run manually via .get_loops()")
+            logger.info(
+                f"Note: The model has more than {max_reactions} reactions. Calculation of loops is skipped, as this "
+                f"would take some time. If needed, please run manually via .get_loops()")
         report_dict = {"community_name": self.name,
                        "model_structure": model_structure,
                        "num_metabolites": num_metabolites,
@@ -2064,16 +2286,51 @@ class CommunityModel:
         name = constructor_args["model"].id
         return cls(name=name, mu_c=flags_and_muc["mu_c"], **constructor_args)
 
+    def feasible_composition_range(self, growth_rate=0.):
+        """
+        Computes the range of feasible compositions at a given growth rate. Changes the model into fixed growth-rate structure.
+
+        :param growth_rate: the target growth rate
+        :return: maximum growth-rate
+        """
+        names = self.get_member_names()
+        frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
+
+        # Set growth rate
+        if growth_rate < 0. or np.isnan(growth_rate):
+            raise ValueError(f"The growth rate needs to be equal to or larger than 0 (provided value: {growth_rate})")
+
+        if self.fixed_abundance_flag:
+            logger.debug("Converting to fixed growth-rate")
+            self.convert_to_fixed_growth_rate()
+        logger.debug(f"Setting fixed growth-rate to {growth_rate}")
+        self.apply_fixed_growth_rate(growth_rate)
+
+        # run fva
+        fva_result = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
+        # create new row containing mu_max
+        new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux": [growth_rate], "max_flux": [growth_rate]})
+        # join fva_result with new row
+        result = pd.concat([fva_result, new_row], ignore_index=True)
+        result["min_flux"] = result["min_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+        result["max_flux"] = result["max_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+        logger.info(f"Feasible composition ranges are: {result}")
+
+        return result
+
+
     def max_growth_rate(self, minimal_abundance=0, return_abundances=False, sensitivity=6):
         """
-        Computes the overall maximum growth rate of the community.
+        Computes the overall maximum growth-rate of the community. Changes the model into fixed growth-rate structure,
+        set to the overall maximum growth-rate.
 
         :param minimal_abundance: float indicating the minimal abundance of each member in the community
         :param return_abundances: If set to True, returns a dataframe with the ranges of feasible member abundances at
         the maximum growth rate
         :param sensitivity: How many decimal places should be calculated
-        Returns: maximum growth rate
+        :return: maximum growth-rate
         """
+
         # set minimal abundance of members
         names = self.get_member_names()
         frxns = [self.model.reactions.get_by_id(f'{name}_fraction_reaction') for name in names]
@@ -2085,54 +2342,89 @@ class CommunityModel:
 
         # set starting values
         lb = 0.
-        ub = 1000.
-        x = 500.
-        result_difference = 1.
+        ub = self.max_flux
+        x = lb + 2*(10. ** (-sensitivity))
+        result_difference = self.max_flux
         result = 0.
         x_is_fba_result = False
 
         while result_difference > 10. ** (-sensitivity):
-            logger.info("New round")
-            logger.info(f"lb: {lb}, ub: {ub}, x: {x}")
+            logger.info(f"New round: lb: {lb}, ub: {ub}, x: {x}")
             # calculate and set mu
             if self.fixed_abundance_flag:
+                logger.debug("Converting to fixed growth-rate")
                 self.convert_to_fixed_growth_rate()
+            logger.debug(f"Setting fixed growth-rate to {x}")
             self.apply_fixed_growth_rate(x)
 
             # sometimes, through computational mistakes, a lower bound ends up smaller than the upper bound
             # in that case, the lower bound is the maximum growth rate
+            logger.debug(f"Checking results if {lb} > {ub}")
             if lb > ub:
+                logger.debug(f"Result is lb {lb}")
                 result = lb
                 break
 
             # check if mu is feasible
+            logger.debug("Check if mu is feasible")
             try:
+                # run fba
+                logger.debug("Running FBA to see if infeasible")
+                objective_value = self.model.slim_optimize()
+                logger.debug(f"Objecive value after FBA: {objective_value}")
+                if np.isnan(objective_value):
+                    # FBA was infeasible
+                    raise cobra.exceptions.Infeasible("Error: Infeasible!")
                 # run fva
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
+                    logger.debug("Running FVA")
                     df = self.run_fva(only_exchange_reactions=False, reactions=frxns, fraction_of_optimum=1)
+                    logger.debug(f"FVA completed:\n{df}")
                 # fix abundances to a point within the feasible composition space of the current mu
                 # get name of the member for each row in the fva df
-                member_id = [string[0:-18] for string in df["reaction_id"]]
+                member_id = [string.replace("_fraction_reaction", "") for string in df["reaction_id"]]
                 # dataframes with min and max flux values of fraction reactions
-                lb_df = (df["min_flux"]).apply(lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance)
-                ub_df = (df["max_flux"])
+                # Ensure lower bounds close to zero are rounded to zero.
+                # This also helps with very small negative values.
+                lb_df = (df["min_flux"]).apply(
+                    lambda lb_x: 0. if close_to_zero(lb_x) else lb_x
+                ).apply(
+                    lambda lb_x: 1. if close_to_zero(1. - lb_x) else lb_x
+                ).apply(
+                    lambda lb_x: lb_x if lb_x > minimal_abundance else minimal_abundance
+                )
+                ub_df = (df["max_flux"]).apply(
+                    lambda ub_x: 0. if close_to_zero(ub_x) else ub_x
+                ).apply(
+                    lambda ub_x: 1. if close_to_zero(1. - ub_x) else ub_x
+                )
                 logger.debug(df)
                 logger.debug(f"lb_df: {lb_df}")
+                logger.debug(f"ub_df: {ub_df}")
                 # dataframe with range of possible abundances
-                r_df = ub_df - lb_df
+                r_df = (ub_df - lb_df).apply(lambda r_x: 0. if close_to_zero(r_x) else r_x)
                 logger.debug(f"R_df: {r_df}")
                 # check that all upper bounds are bigger than the set minimal abundance
                 if not (ub_df >= minimal_abundance).all():
+                    logger.warning(f"Not all upper bounds are bigger than the set minimal abundance:\n{ub_df}")
                     raise ValueError("Not all upper bounds are bigger than the set minimal abundance")
                 # check that upper bounds are larger than lower bounds and therefore that no value in R_df is negative
                 if not (r_df >= 0.).all():
+                    logger.warning(f"Some possible ranges are less than 0.:\n{r_df}")
                     raise ValueError("Some possible ranges are less than 0.")
                 # check that the solution is not erroneous in the sense that the abundances sum up to 1.
-                if not (sum(ub_df) >= 1. >= sum(lb_df)):
+                sum_ub_df = sum(ub_df)
+                sum_ub_df = 1. if close_to_zero(1. - sum_ub_df) else sum_ub_df
+                sum_lb_df = sum(lb_df)
+                sum_lb_df = 0. if close_to_zero(sum_lb_df) else sum_lb_df
+                sum_lb_df = 1. if close_to_zero(1. - sum_lb_df) else sum_lb_df
+                if not (sum_ub_df >= 1. >= sum_lb_df):
+                    logger.warning(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                     raise ValueError(f"Upper and lower bounds do not allow abundances to sum up to 1: {ub_df}, {lb_df}")
                 # The total flexibility for different abundances
-                delta = 1. - sum(lb_df)
+                delta = 1. - sum_lb_df
+                delta = 0. if close_to_zero(delta) else delta
                 logger.debug(f"Delta: {delta}")
                 # if Delta is 0, the abundances must be the corresponding minimal fluxes in the fva
                 if delta > 0.:
@@ -2143,19 +2435,36 @@ class CommunityModel:
                     ab_df = lb_df
                 logger.debug(f"ab_df: {ab_df}")
                 # create an abundance dictionary
+                # Safeguard against abundances very close to 0. or 1
+                abd_t = max(cobra.Configuration().tolerance * 100, 10 ** (-sensitivity))
+                ab_df = ab_df.apply(lambda abd: 0. if close_to_zero(abd, t=abd_t) else (
+                    1. if close_to_zero(1. - abd, t=abd_t) else abd))
+                logger.debug(f"Corrected abundances: {ab_df}")
                 abundance_dict = dict(zip(member_id, ab_df))
                 # set abundance
+                logger.debug(f"Setting abundance to {abundance_dict}")
                 self.convert_to_fixed_abundance()
                 self.apply_fixed_abundance(abundance_dict)
 
                 # conduct fba with this composition
+                logger.debug(f"Running FBA")
                 fba_result = self.model.slim_optimize()
                 if isnan(fba_result):
+                    logger.debug("FBA result is NaN")
                     raise cobra.exceptions.Infeasible("FBA result is NaN!")
                 logger.debug(f"fba results: {fba_result}")
 
                 # check if fba result >= x
                 if fba_result >= x:
+                    # fba result becomes the new x
+                    x = fba_result + 2 * 10 ** -sensitivity
+                    x_is_fba_result = True
+                    # adjust remaining parameters
+                    lb = fba_result
+                    result_difference = fba_result - result
+                    result = fba_result
+                elif close_to_zero(fba_result - x):
+                    logger.debug(f"fba result is only marginally smaller than x: {fba_result} ~= {x}")
                     # fba result becomes the new x
                     x = fba_result + 2 * 10 ** -sensitivity
                     x_is_fba_result = True
@@ -2179,6 +2488,7 @@ class CommunityModel:
 
             if ub - lb < 10 ** (-sensitivity):
                 result_difference = 0.
+            logger.debug(f"Loop end with result_difference {result_difference}")
 
         # truncate result
         result = np.floor((result * 10 ** sensitivity)) / 10 ** sensitivity
@@ -2194,14 +2504,33 @@ class CommunityModel:
             new_row = pd.DataFrame({"reaction_id": ["community_biomass"], "min_flux": [result], "max_flux": [result]})
             # join fva_result with new row
             result = pd.concat([fva_result, new_row], ignore_index=True)
+            result["min_flux"] = result["min_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+            result["max_flux"] = result["max_flux"].apply(lambda r: 0. if close_to_zero(r) else r)
+
+        logger.info(f"Maximum growth-rate is {result}")
         return result
 
 
-def doall(model_folder="", models=None, com_model=None, out_dir="", community_name="community_model",
-          fixed_growth_rate=None, abundance="equal", medium=None,
-          fba_solution_file=None, fva_solution_file=None, fva_solution_threshold=0.9, fba_interaction_file=None,
-          fva_interaction_file=None, composition_agnostic=False, sbml_output_file=None, return_as_cobra_model=False,
-          merge_via_annotation=None, loopless=True, num_cores=1):
+def doall(model_folder="",
+          models=None,
+          com_model=None,
+          out_dir="",
+          community_name="community_model",
+          fixed_growth_rate=None,
+          abundance="equal",
+          medium=None,
+          fba_solution_file=None,
+          fva_solution_file=None,
+          fva_solution_threshold=0.9,
+          fba_interaction_file=None,
+          fva_interaction_file=None,
+          composition_agnostic=False,
+          max_growth_rate_file=None,
+          sbml_output_file=None,
+          return_as_cobra_model=False,
+          merge_via_annotation=None,
+          loopless=True,
+          num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
     generation of community metabolic models, their analyses and can save the results of analyses as well as the model
@@ -2224,6 +2553,8 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     :param fva_interaction_file: Run FVA to calculate cross-feeding interactions and save the solution to this file
     :param composition_agnostic: Run FVA with relaxed constraints (composition agnostic)
     :param sbml_output_file: If a filename is given, save the community metabolic model as SBML file
+    :param max_growth_rate_file: If a filename is given, calculate the maximum community growth-rate, including the
+        feasible community composition.
     :param return_as_cobra_model: If true, returns the community metabolic model as COBRApy model object, otherwise as
         PyCoMo CommunityModel object
     :param merge_via_annotation: The database to be used for matching boundary metabolites when merging into a
@@ -2236,11 +2567,13 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     com_model_obj = None
     if com_model is not None:
         # Load community model
+        logger.info(f"Loading community model from file {com_model}")
         com_model_obj = CommunityModel.load(com_model)
     else:
         # Load single organism models
         # Either from folder or as list of file names or list of cobra models
         if model_folder != "":
+            logger.info(f"Loading member models from folder {model_folder}")
             named_models = load_named_models_from_dir(model_folder)
             if len(named_models) == 0:
                 raise ValueError(
@@ -2255,6 +2588,7 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
             # Extract names and store in named models
             named_models = {model.name: model for model in models}
         elif all(list(map(lambda x: isinstance(x, str), models))):
+            logger.info(f"Loading member models from files")
             named_models = {}
             for model_path in models:
                 model, name = load_named_model(model_path)
@@ -2266,14 +2600,17 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
         single_org_models = [SingleOrganismModel(model, name) for name, model in named_models.items()]
 
         # Create a community model
+        logger.info(f"Creating a community model")
         com_model_obj = CommunityModel(single_org_models, community_name, merge_via_annotation=merge_via_annotation)
         com_model_obj.generate_community_model()
 
     if fixed_growth_rate is None:
         # Apply abundance (either None, "equal", or an abundance dict)
         if abundance == "equal":
+            logger.info(f"Setting to equal abundance")
             com_model_obj.equal_abundance()
         elif isinstance(abundance, dict):
+            logger.info(f"Setting abundances accordung to {abundance}")
             name_conversion = com_model_obj.generate_member_name_conversion_dict()
             tmp_abundance = {}
             try:
@@ -2281,8 +2618,8 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
                     tmp_abundance[name_conversion[name]] = fraction
             except KeyError as e:
                 err_msg = f"Error: Some names in the abundances are not part of the model." \
-                        f"\n\tAbundances: {abundance.keys()}" \
-                        f"\n\tOrganisms in model: {com_model_obj.get_member_names()}"
+                          f"\n\tAbundances: {abundance.keys()}" \
+                          f"\n\tOrganisms in model: {com_model_obj.get_member_names()}"
                 raise KeyError(err_msg)
             com_model_obj.convert_to_fixed_abundance()
             com_model_obj.apply_fixed_abundance(tmp_abundance)
@@ -2291,55 +2628,86 @@ def doall(model_folder="", models=None, com_model=None, out_dir="", community_na
     else:
         if fixed_growth_rate < 0.:
             logger.error(f"Error: Specified growth rate is negative ({fixed_growth_rate}). PyCoMo will continue with a "
-                  f"growth rate set to 0.")
+                         f"growth rate set to 0.")
             fixed_growth_rate = 0.
+        logger.info(f"Setting to fixed growth rate ({fixed_growth_rate})")
         com_model_obj.convert_to_fixed_growth_rate()
         com_model_obj.apply_fixed_growth_rate(fixed_growth_rate)
 
     # Apply medium
     if medium is not None:
+        logger.info(f"Loading medium from file")
         com_model_obj.load_medium_from_file(medium)
         com_model_obj.apply_medium()
 
     if sbml_output_file is not None:
+        logger.info(f"Saving model to {os.path.join(out_dir, sbml_output_file)}")
         com_model_obj.save(os.path.join(out_dir, sbml_output_file))
 
-    if fba_solution_file is not None:
-        try:
-            com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_file))
-        except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FBA of community is infeasible. No FBA flux vector file was generated.")
-
-    if fva_solution_file is not None:
-        try:
-            com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_file),
-                                                   fraction_of_optimum=fva_solution_threshold,
-                                                   processes=num_cores,
-                                                   composition_agnostic=composition_agnostic,
-                                                   loopless=loopless)
-        except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FVA of community is infeasible. No FVA flux vector file was generated.")
-
+    fva_flux_vector = None
     if fva_interaction_file is not None:
+        logger.info(f"Running FVA")
         try:
-            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=False,
-                                                                          composition_agnostic=composition_agnostic,
-                                                                          loopless=loopless,
-                                                                          processes=num_cores)
+            interaction_df, fva_flux_vector = com_model_obj.potential_metabolite_exchanges(
+                fba=False,
+                composition_agnostic=composition_agnostic,
+                fraction_of_optimum=fva_solution_threshold,
+                loopless=loopless,
+                processes=num_cores,
+                return_flux_vector=True)
             logger.info(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_file)}")
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FVA of community is infeasible. No FVA interaction file was generated.")
+            logger.warning(f"FVA of community is infeasible. No FVA interaction file was generated.")
 
-    if fba_interaction_file is not None:
+    if fva_solution_file is not None:
+        logger.info(f"Running FVA")
         try:
-            interaction_df = com_model_obj.potential_metabolite_exchanges(fba=True)
+            if fva_flux_vector is not None:
+                # Use flux vector from interactions
+                fva_flux_vector.to_csv(os.path.join(out_dir, fva_solution_file), sep="\t", header=True,
+                                       index=False, float_format='%f')
+            else:
+                com_model_obj.fva_solution_flux_vector(file_path=os.path.join(out_dir, fva_solution_file),
+                                                       fraction_of_optimum=fva_solution_threshold,
+                                                       processes=num_cores,
+                                                       composition_agnostic=composition_agnostic,
+                                                       loopless=loopless)
+        except cobra.exceptions.Infeasible:
+            logger.warning(f"FVA of community is infeasible. No FVA flux vector file was generated.")
+
+    fba_flux_vector = None
+    if fba_interaction_file is not None:
+        logger.info(f"Running FBA")
+        try:
+            interaction_df, fba_flux_vector = com_model_obj.potential_metabolite_exchanges(fba=True,
+                                                                                           return_flux_vector=True)
             logger.info(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_file)}")
             interaction_df.to_csv(os.path.join(out_dir, fba_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
         except cobra.exceptions.Infeasible:
-            logger.warning(f"WARNING: FBA of community is infeasible. No FBA interaction file was generated.")
+            logger.warning(f"FBA of community is infeasible. No FBA interaction file was generated.")
+
+    if fba_solution_file is not None:
+        logger.info(f"Running FBA")
+        try:
+            if fba_flux_vector is not None:
+                # Use flux vector from interactions
+                fva_flux_vector.to_csv(os.path.join(out_dir, fba_solution_file), sep="\t", header=True,
+                                       index=False, float_format='%f')
+            else:
+                com_model_obj.fba_solution_flux_vector(file_path=os.path.join(out_dir, fba_solution_file))
+        except cobra.exceptions.Infeasible:
+            logger.warning(f"FBA of community is infeasible. No FBA flux vector file was generated.")
+
+    if max_growth_rate_file is not None:
+        logger.info(f"Calculating the maximum growth rate")
+        try:
+            growth_df = com_model_obj.max_growth_rate(sensitivity=4, return_abundances=True)
+            growth_df.to_csv(os.path.join(out_dir, max_growth_rate_file))
+        except cobra.exceptions.Infeasible:
+            logger.warning(f"FBA of community is infeasible. No maximum growth-rate file was generated.")
 
     if return_as_cobra_model:
         # Retrieve community model
@@ -2355,45 +2723,70 @@ def main():
     parser = create_arg_parser()
     args = parser.parse_args()
     args = check_args(args)
+    if args.log_file is not None:
+        configure_logger(log_file=args.log_file)
+    if args.log_level is not None:
+        configure_logger(level=args.log_level)
     logger.info(args)
     if args.abundance is not None and args.abundance != "equal":
         # Retrieve the abundance from file
         args.abundance = read_abundance_from_file(args.abundance)
 
     if args.is_community:
-        doall(com_model=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+        doall(com_model=args.input[0],
+              community_name=args.name,
+              out_dir=args.output_dir,
+              abundance=args.abundance,
               medium=args.medium,
-              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fba_solution_file=args.fba_solution_file,
+              fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fraction_of_optimum,
+              fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
-              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file,
+              return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
-              loopless=args.loopless)
+              loopless=args.loopless,
+              max_growth_rate_file=args.max_growth_rate_file)
 
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
-        doall(model_folder=args.input[0], community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+        doall(model_folder=args.input[0],
+              community_name=args.name,
+              out_dir=args.output_dir,
+              abundance=args.abundance,
               medium=args.medium,
-              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fba_solution_file=args.fba_solution_file,
+              fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fraction_of_optimum,
+              fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
-              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file,
+              return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
-              loopless=args.loopless)
+              loopless=args.loopless,
+              max_growth_rate_file=args.max_growth_rate_file)
     else:
-        doall(models=args.input, community_name=args.name, out_dir=args.output_dir, abundance=args.abundance,
+        doall(models=args.input,
+              community_name=args.name,
+              out_dir=args.output_dir,
+              abundance=args.abundance,
               medium=args.medium,
-              fba_solution_file=args.fba_solution_file, fva_solution_file=args.fva_solution_file,
-              fva_solution_threshold=args.fva_flux, fba_interaction_file=args.fba_interaction_file,
+              fba_solution_file=args.fba_solution_file,
+              fva_solution_file=args.fva_solution_file,
+              fva_solution_threshold=args.fraction_of_optimum,
+              fba_interaction_file=args.fba_interaction_file,
               fva_interaction_file=args.fva_interaction_file,
-              sbml_output_file=args.sbml_output_file, return_as_cobra_model=False,
+              sbml_output_file=args.sbml_output_file,
+              return_as_cobra_model=False,
               merge_via_annotation=args.match_via_annotation,
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
-              loopless=args.loopless)
+              loopless=args.loopless,
+              max_growth_rate_file=args.max_growth_rate_file)
 
     logger.info("All done!")
     sys.exit(0)

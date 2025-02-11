@@ -1,0 +1,5 @@
+metabolite_id	metabolite_name	cross_feeding	produced_by	consumed_by
+S1_medium	Substrate	False	[]	['toy_1']
+C_medium	C	True	['toy_1']	['toy_2_2']
+S2_medium	Substrate	False	[]	['toy_2_2']
+cpd11416_medium	Community Biomass	False	['toy_1', 'toy_2_2']	[]
