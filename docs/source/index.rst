@@ -37,6 +37,7 @@ Michael Predl, Marianne Mießkes, Thomas Rattei, Jürgen Zanghellini, PyCoMo: a 
    :caption: API
 
    classes
+   helper
    
 
 
