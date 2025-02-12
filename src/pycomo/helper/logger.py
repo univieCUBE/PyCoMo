@@ -18,6 +18,10 @@ log_file_name = None
 
 
 class RegexFilter(logging.Filter):
+    """
+    Filter incoming warning messages with regex patterns. 
+    Intended for common warnings of imported packages, that are expected with correct behaviour of PyCoMo.
+    """
     def __init__(self, pattern):
         super().__init__()
         self.pattern = re.compile(pattern)
@@ -47,6 +51,12 @@ logging.getLogger("cobra.io.sbml").addFilter(regex_filter_sbml)
 
 
 def configure_logger(level=None, log_file=None):
+    """
+    Configure the logger with log-level and/or log file location.
+
+    :param level: One of: "debug", "info", "warning", "error"
+    :param log_file: Location for the log file
+    """
     global log_level, log_file_name
 
     log_level_dict = {
@@ -80,5 +90,10 @@ def configure_logger(level=None, log_file=None):
 
 
 def get_logger_conf():
+    """
+    Get the current configuration of the logger (level and file location).
+
+    :return: tuple of log-level and log-filename
+    """
     global log_level, log_file_name
     return log_level, log_file_name
