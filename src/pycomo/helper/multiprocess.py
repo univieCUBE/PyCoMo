@@ -203,12 +203,12 @@ def loopless_fva(pycomo_model,
     :param reactions: A list of reactions that should be analysed
     :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
     :param use_loop_reactions_for_ko: Find loops in the model and use these reactions as ko_candidates. Overwrites
-    value in ko_candidates
+        value in ko_candidates
     :param ko_candidate_ids: Reactions to be constrained and used in the objective (as set of reaction ids)
     :param verbose: Prints progress messages
     :param processes: The number of processes to use for the calculation
     :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
-    reaction IDs
+        reaction IDs
     """
 
     if verbose:
@@ -432,12 +432,12 @@ def fva(pycomo_model,
     :param reactions: A list of reactions that should be analysed
     :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
     :param use_loop_reactions_for_ko: Find loops in the model and use these reactions as ko_candidates. Overwrites
-    value in ko_candidates
+        value in ko_candidates
     :param ko_candidate_ids: Reactions to be constrained and used in the objective (as set of reaction ids)
     :param verbose: Prints progress messages
     :param processes: The number of processes to use for the calculation
     :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
-    reaction IDs
+        reaction IDs
     """
 
     if verbose:
