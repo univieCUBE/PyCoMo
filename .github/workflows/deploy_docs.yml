@@ -18,3 +18,4 @@ jobs:
       uses: sphinx-notes/pages@v3
       with:
         documentation_path: ./docs/source
+        pre-build-command: apt install --yes git build-essential pandoc
