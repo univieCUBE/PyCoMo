@@ -615,7 +615,7 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def _init_loop_worker(model, logger_conf):
+def _init_loop_worker(model, logger_conf=None):
     """
     Initialize a global model object for multiprocessing.
 
@@ -625,12 +625,13 @@ def _init_loop_worker(model, logger_conf):
     global _model
     _model = model
     pid = os.getpid()
-    logging.basicConfig(
-        filename=f'pycomo_worker_{pid}.log',
-        level=logging.INFO,
-        format='%(asctime)s %(process)d %(levelname)s %(message)s'
-    )
-    configure_logger(logger_conf[0], logger_conf[1])
+    if logger_conf is not None:
+        logging.basicConfig(
+            #filename=f'pycomo_worker_{pid}.log',
+            level=logging.INFO,
+            format='%(asctime)s %(process)d %(levelname)s %(message)s'
+        )
+        configure_logger(logger_conf[0], logger_conf[1])
     logger.debug(f"Worker {pid} initialized.")
 
 

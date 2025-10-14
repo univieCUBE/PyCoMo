@@ -25,7 +25,7 @@ logger.info('Multiprocess Logger initialized.')
 configuration = Configuration()
 
 
-def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf) -> None:
+def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf=None) -> None:
     """
     Initialize a global model object and corresponding variables for multiprocessing.
 
@@ -41,7 +41,8 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf) -> Non
     _f_rxn_set = set(get_f_reactions(_model))
     _exchg_rxn_set = set(_model.exchanges)
     _ll_candidates = set(_model.reactions.get_by_any(ko_candidate_ids))
-    configure_logger(logger_conf[0], logger_conf[1])
+    if logger_conf is not None:
+        configure_logger(logger_conf[0], logger_conf[1])
     logger.debug(f"_init_worker finished in {time.time() - s_time}")
 
 
@@ -366,7 +367,7 @@ def loopless_fva(pycomo_model,
                         result.at[rxn_id, "maximum"] = max_flux
                         result.at[rxn_id, "minimum"] = min_flux
         else:
-            _init_fva_worker(pycomo_model.model, ko_candidate_ids, get_logger_conf())
+            _init_fva_worker(pycomo_model.model, ko_candidate_ids)
             for res_tuple in map(_loopless_fva_step, reaction_ids):
                 if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                     logger.error(f"Worker error captured:\n{res_tuple}")
@@ -578,7 +579,7 @@ def fva(pycomo_model,
                         result.at[rxn_id, "maximum"] = max_flux
                         result.at[rxn_id, "minimum"] = min_flux
         else:
-            _init_fva_worker(pycomo_model.model, [], get_logger_conf())
+            _init_fva_worker(pycomo_model.model, [])
             for res_tuple in map(_fva_step, reaction_ids):
                 if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                     logger.error(f"Worker error captured:\n{res_tuple}")

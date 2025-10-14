@@ -1631,32 +1631,43 @@ class CommunityModel:
             self.convert_to_fixed_growth_rate()
 
         reactions_to_remove = [model.reactions.get_by_id("f_final")]
+        metabolites_to_remove = []
 
-        for reaction in model.reactions:
+        logger.debug(f"Checking for reactions to remove")
+        for i, reaction in enumerate(model.reactions):
             if "fraction_reaction" in reaction.id:
+                logger.debug(f"Checking reaction {reaction.id}")
                 reactions_to_remove.append(reaction)
                 for metabolite, coeff in reaction.metabolites.items():
                     if "_lb" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.lower_bound = -coeff / self._dummy_metabolite_scaling_factor
                         replace_metabolite_stoichiometry(rxn, {metabolite: 0})
-                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
-                        metabolite.remove_from_model(True)
+                        #replace_metabolite_stoichiometry(reaction, {metabolite: 0})
+                        #metabolite.remove_from_model(True)
+                        metabolites_to_remove.append(metabolite)
                     elif "_ub" == metabolite.id[-3:]:
                         rxn = model.reactions.get_by_id(metabolite.id[:-3])
                         rxn.upper_bound = coeff / self._dummy_metabolite_scaling_factor
                         replace_metabolite_stoichiometry(rxn, {metabolite: 0})
-                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
-                        metabolite.remove_from_model(True)
+                        #replace_metabolite_stoichiometry(reaction, {metabolite: 0})
+                        #metabolite.remove_from_model(True)
+                        metabolites_to_remove.append(metabolite)
                     elif "_f_biomass_met" in metabolite.id:
                         rxn = model.reactions.get_by_id(
                             metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
                         replace_metabolite_stoichiometry(rxn, {metabolite: 0})
-                        replace_metabolite_stoichiometry(reaction, {metabolite: 0})
-                        metabolite.remove_from_model(True)
+                        #replace_metabolite_stoichiometry(reaction, {metabolite: 0})
+                        #metabolite.remove_from_model(True)
+                        metabolites_to_remove.append(metabolite)
 
-        for reaction in reactions_to_remove:
-            reaction.remove_from_model(remove_orphans=True)
+        logger.info(f"Removing {len(reactions_to_remove)} fraction reactions")
+        model.remove_reactions(reactions_to_remove, remove_orphans=True)
+        logger.debug("Reactions removed")
+
+        logger.info(f"Removing {len(metabolites_to_remove)} metabolites")
+        model.remove_metabolites(metabolites_to_remove, destructive=True)
+        logger.debug("Metabolites removed")
 
         return model
 
