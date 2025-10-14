@@ -10,6 +10,7 @@ from pycomo.helper.spawnprocesspool import SpawnProcessPool
 import multiprocessing
 from cobra.core import Configuration
 import logging
+from pycomo.helper.logger import configure_logger, get_logger_conf
 
 logger = logging.getLogger("pycomo")
 logger.info('Utils Logger initialized.')
@@ -612,7 +613,7 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def _init_loop_worker(model):
+def _init_loop_worker(model, logger_conf):
     """
     Initialize a global model object for multiprocessing.
 
@@ -621,6 +622,7 @@ def _init_loop_worker(model):
 
     global _model
     _model = model
+    configure_logger(logger_conf[0], logger_conf[1])
 
 
 def _find_loop_step(rxn_id):
@@ -664,7 +666,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
         with SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
-                initargs=(tuple([loop_model])),
+                initargs=(tuple([loop_model, get_logger_conf()])),
         ) as pool:
             async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
             for input_rxn, res in zip(reaction_ids, async_results):
