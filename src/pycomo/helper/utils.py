@@ -9,6 +9,8 @@ import numpy as np
 from pycomo.helper.spawnprocesspool import SpawnProcessPool
 import multiprocessing
 from cobra.core import Configuration
+import time
+import traceback
 import logging
 from pycomo.helper.logger import configure_logger, get_logger_conf
 
@@ -622,17 +624,42 @@ def _init_loop_worker(model, logger_conf):
 
     global _model
     _model = model
+    pid = os.getpid()
+    logging.basicConfig(
+        filename=f'pycomo_worker_{pid}.log',
+        level=logging.INFO,
+        format='%(asctime)s %(process)d %(levelname)s %(message)s'
+    )
     configure_logger(logger_conf[0], logger_conf[1])
+    logger.debug(f"Worker {pid} initialized.")
 
 
-def _find_loop_step(rxn_id):
-    rxn = _model.reactions.get_by_id(rxn_id)
-    _model.objective = rxn.id
-    solution = _model.optimize("minimize")
-    min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-    solution = _model.optimize("maximize")
-    max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-    return rxn_id, max_flux, min_flux
+def _find_loop_step(rxn_id, status_dict=None):
+    try:
+        pid = os.getpid()
+        if status_dict is not None:
+            status_dict[pid] = {"status": "Minimize", "timestamp": time.time()}
+            status_dict[pid]["status"] = f"Starting find_loop_step for {rxn_id}"
+
+        rxn = _model.reactions.get_by_id(rxn_id)
+        _model.objective = rxn.id
+        if status_dict is not None:
+            status_dict[pid]["status"] = f"Minimize {rxn_id}"
+            status_dict[pid]["timestamp"] = time.time()
+        solution = _model.optimize("minimize")
+        min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+        if status_dict is not None:
+            status_dict[pid]["status"] = f"Maximize {rxn_id}"
+            status_dict[pid]["timestamp"] = time.time()
+        solution = _model.optimize("maximize")
+        max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+        if status_dict is not None:
+            status_dict[pid]["status"] = f"Finished {rxn_id}"
+            status_dict[pid]["timestamp"] = time.time()
+        return rxn_id, max_flux, min_flux
+    except Exception as e:
+        logger.error(f"Error thrown in FVA step {rxn_id}")
+        return f"Error: {e}\n{traceback.format_exc()}"
 
 
 def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
@@ -662,32 +689,64 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
         chunk_size = len(reaction_ids) // processes
         time_out_step = min(100, int((max_time_out-time_out)/2.))
         failed_tasks = []
+        manager = multiprocessing.Manager()
+        status_dict = manager.dict()
         
         with SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
                 initargs=(tuple([loop_model, get_logger_conf()])),
         ) as pool:
-            async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
-            for input_rxn, res in zip(reaction_ids, async_results):
-                try:
-                    res_tuple = res.get(timeout=time_out)
-                    rxn_id, max_flux, min_flux = res_tuple
-                    processed_rxns += 1
-                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                    if min_flux != 0. or max_flux != 0.:
-                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
-                except multiprocessing.TimeoutError:
-                    logger.warning(f"Find loops step timed out for rxn {input_rxn}")
-                    failed_tasks.append(input_rxn)
+            async_results = [pool.apply_async(_find_loop_step, args=(r,status_dict)) for r in reaction_ids]
+            pending = list(zip(reaction_ids, async_results))
+            last_processed = processed_rxns
+
+            while pending:
+                found_result = False
+                rounds_since_last_result = 0
+                for i, (input_rxn, res) in enumerate(pending):
+                    try:
+                        res_tuple = res.get(timeout=2)  # Short timeout
+                        rxn_id, max_flux, min_flux = res_tuple
+                        processed_rxns += 1
+                        rounds_since_last_result = 0
+                        if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                        if min_flux != 0. or max_flux != 0.:
+                            loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                        pending.pop(i)
+                        found_result = True
+                        break  # Only process one result per loop
+                    except multiprocessing.TimeoutError:
+                        continue
+                if not found_result:
+                    rounds_since_last_result += 1
+                    # No new result, display status queue
+                    logger.debug("No new results, current worker status:")
+                    for pid, info in status_dict.items():
+                        logger.debug(f"Worker {pid}: {info['status']}")
+                        if time.time() - info["timestamp"] > 30:
+                            logger.warning(f"Worker {pid} may be deadlocked (no update for 30s)")
+                    time.sleep(2)  # Wait before next check
+            # for input_rxn, res in zip(reaction_ids, async_results):
+            #     try:
+            #         res_tuple = res.get(timeout=time_out)
+            #         rxn_id, max_flux, min_flux = res_tuple
+            #         processed_rxns += 1
+            #         if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+            #             logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+            #         if min_flux != 0. or max_flux != 0.:
+            #             loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+            #     except multiprocessing.TimeoutError:
+            #         logger.warning(f"Find loops step timed out for rxn {input_rxn}")
+            #         failed_tasks.append(input_rxn)
             if failed_tasks:
                 time_out += time_out_step
                 time_out = min(max_time_out, time_out)
                 logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
                 while failed_tasks and time_out <= max_time_out:
                     repeat_failed_tasks = []
-                    async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in failed_tasks]
+                    async_results = [pool.apply_async(_find_loop_step, args=(r,status_dict)) for r in failed_tasks]
                     for input_rxn, res in zip(failed_tasks, async_results):
                         try:
                             res_tuple = res.get(timeout=time_out)
