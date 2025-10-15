@@ -647,14 +647,14 @@ def _find_loop_step(rxn_id, status_dict=None):
         if status_dict is not None:
             status_dict[pid]["status"] = f"Minimize {rxn_id}"
             status_dict[pid]["timestamp"] = time.time()
-        logger.debug(f"{pid}: Starting minimize {rxn_id}")
+        #logger.debug(f"{pid}: Starting minimize {rxn_id}")
         solution = _model.optimize("minimize")
         logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
         min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
         if status_dict is not None:
             status_dict[pid]["status"] = f"Maximize {rxn_id}"
             status_dict[pid]["timestamp"] = time.time()
-        logger.debug(f"{pid}: Starting maximize {rxn_id}")
+        #logger.debug(f"{pid}: Starting maximize {rxn_id}")
         solution = _model.optimize("maximize")
         logger.debug(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
         max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
@@ -730,9 +730,9 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         found_result = True
                         break  # Only process one result per loop
                     except multiprocessing.TimeoutError:
-                        logger.debug(f"Timeout waiting for result of rxn {input_rxn}")
-                        for pid, info in status_dict.items():
-                            logger.debug(f"Worker {pid}: {info}")
+                        # logger.debug(f"Timeout waiting for result of rxn {input_rxn}")
+                        # for pid, info in status_dict.items():
+                        #     logger.debug(f"Worker {pid}: {info}")
                         continue
                 if not found_result:
                     rounds_since_last_result += 1
