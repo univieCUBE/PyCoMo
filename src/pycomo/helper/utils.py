@@ -639,7 +639,7 @@ def _find_loop_step(rxn_id, status_dict=None):
     try:
         pid = os.getpid()
         if status_dict is not None:
-            status_dict[pid] = {"status": "Minimize", "timestamp": time.time()}
+            status_dict[pid] = {"status": "Starting", "timestamp": time.time(), "target": rxn_id}
             status_dict[pid]["status"] = f"Starting find_loop_step for {rxn_id}"
         logger.debug(f"{pid}: Starting {rxn_id}")
         rxn = _model.reactions.get_by_id(rxn_id)
@@ -710,9 +710,13 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             while pending:
                 found_result = False
                 rounds_since_last_result = 0
+                if len(status_dict) == 0:
+                    logger.debug("No workers active - trying again")
+                    time.sleep(1)
+                    continue
                 for i, (input_rxn, res) in enumerate(pending):
                     try:
-                        res_tuple = res.get(timeout=2)  # Short timeout
+                        res_tuple = res.get(timeout=0.00001)  # Short timeout
                         rxn_id, max_flux, min_flux = res_tuple
                         processed_rxns += 1
                         rounds_since_last_result = 0
@@ -726,15 +730,21 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         found_result = True
                         break  # Only process one result per loop
                     except multiprocessing.TimeoutError:
+                        logger.debug(f"Timeout waiting for result of rxn {input_rxn}")
+                        for pid, info in status_dict.items():
+                            logger.debug(f"Worker {pid}: {info}")
                         continue
                 if not found_result:
                     rounds_since_last_result += 1
                     # No new result, display status queue
-                    logger.debug("No new results, current worker status:")
-                    for pid, info in status_dict.items():
-                        logger.debug(f"Worker {pid}: {info['status']}")
-                        if time.time() - info["timestamp"] > 30:
-                            logger.warning(f"Worker {pid} may be deadlocked (no update for 30s)")
+                    logger.debug(f"No new results, current worker status: {status_dict}")
+                    if len(status_dict) == 0:
+                        logger.debug("No workers active - trying again")
+                    else:
+                        for pid, info in status_dict.items():
+                            logger.debug(f"Worker {pid}: {info['status']}")
+                            if time.time() - info["timestamp"] > 30:
+                                logger.warning(f"Worker {pid} may be deadlocked (no update for 30s)")
                     time.sleep(2)  # Wait before next check
             # for input_rxn, res in zip(reaction_ids, async_results):
             #     try:
