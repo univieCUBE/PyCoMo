@@ -626,11 +626,11 @@ def _init_loop_worker(model, logger_conf=None):
     _model = model
     pid = os.getpid()
     if logger_conf is not None:
-        logging.basicConfig(
-            #filename=f'pycomo_worker_{pid}.log',
-            level=logging.INFO,
-            format='%(asctime)s %(process)d %(levelname)s %(message)s'
-        )
+        # logging.basicConfig(
+        #     #filename=f'pycomo_worker_{pid}.log',
+        #     level=logging.INFO,
+        #     format='%(asctime)s %(process)d %(levelname)s %(message)s'
+        # )
         configure_logger(logger_conf[0], logger_conf[1])
     logger.debug(f"Worker {pid} initialized.")
 
@@ -641,26 +641,31 @@ def _find_loop_step(rxn_id, status_dict=None):
         if status_dict is not None:
             status_dict[pid] = {"status": "Minimize", "timestamp": time.time()}
             status_dict[pid]["status"] = f"Starting find_loop_step for {rxn_id}"
-
+        logger.debug(f"{pid}: Starting {rxn_id}")
         rxn = _model.reactions.get_by_id(rxn_id)
         _model.objective = rxn.id
         if status_dict is not None:
             status_dict[pid]["status"] = f"Minimize {rxn_id}"
             status_dict[pid]["timestamp"] = time.time()
+        logger.debug(f"{pid}: Starting minimize {rxn_id}")
         solution = _model.optimize("minimize")
+        logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
         min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
         if status_dict is not None:
             status_dict[pid]["status"] = f"Maximize {rxn_id}"
             status_dict[pid]["timestamp"] = time.time()
+        logger.debug(f"{pid}: Starting maximize {rxn_id}")
         solution = _model.optimize("maximize")
+        logger.debug(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
         max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
         if status_dict is not None:
             status_dict[pid]["status"] = f"Finished {rxn_id}"
             status_dict[pid]["timestamp"] = time.time()
+        logger.debug(f"{pid}: Finished {rxn_id}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
-        logger.error(f"Error thrown in FVA step {rxn_id}")
-        return f"Error: {e}\n{traceback.format_exc()}"
+        logger.error(f"{pid}: Error thrown in FVA step {rxn_id}")
+        return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
 def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
@@ -713,6 +718,8 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         rounds_since_last_result = 0
                         if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
                             logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                            for pid, info in status_dict.items():
+                                logger.debug(f"Worker {pid}: {info}")
                         if min_flux != 0. or max_flux != 0.:
                             loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
                         pending.pop(i)

@@ -153,6 +153,7 @@ def _loopless_fva_step(rxn_id):
 
         _model.objective = rxn.id
         solution = _model.optimize("minimize")
+        logger.debug(f"{rxn.id} solver status on min is {solution.status}")
         if not solution.status == "infeasible":
             if perform_loopless_on_rxn:
                 logger.debug(f"{rxn.id} Starting loop correction")
@@ -164,8 +165,9 @@ def _loopless_fva_step(rxn_id):
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
             logger.debug(f"{rxn.id} min flux is infeasible")
-            min_flux = 0.
+            min_flux = float("nan")
         solution = _model.optimize("maximize")
+        logger.debug(f"{rxn.id} solver status on max is {solution.status}")
         if not solution.status == "infeasible":
             if perform_loopless_on_rxn:
                 logger.debug(f"{rxn.id} Starting loop correction")
@@ -177,7 +179,7 @@ def _loopless_fva_step(rxn_id):
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
             logger.debug(f"{rxn.id} max flux is infeasible")
-            max_flux = 0.
+            max_flux = float("nan")
         logger.debug(f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
@@ -387,19 +389,21 @@ def _fva_step(rxn_id):
         logger.debug(f"Running minimize for rxn {rxn_id}")
         solution = _model.optimize("minimize")
         logger.debug(f"Running minimize finished for rxn {rxn_id}")
+        logger.debug(f"{rxn.id} solver status on min is {solution.status}")
         if not solution.status == "infeasible":
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
             logger.debug(f"{rxn.id} min flux is infeasible")
-            min_flux = 0.
+            min_flux = float("nan")
         logger.debug(f"Running maximize for rxn {rxn_id}")
         solution = _model.optimize("maximize")
         logger.debug(f"Running maximize finished for rxn {rxn_id}")
+        logger.debug(f"{rxn.id} solver status on max is {solution.status}")
         if not solution.status == "infeasible":
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
             logger.debug(f"{rxn.id} max flux is infeasible")
-            max_flux = 0.
+            max_flux = float("nan")
         logger.debug(f"FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
