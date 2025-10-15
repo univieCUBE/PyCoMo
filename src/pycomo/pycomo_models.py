@@ -1790,6 +1790,11 @@ class CommunityModel:
                      f"processes: {processes}\n\t")
         model = self.model
 
+        if verbose:
+            log_call = logger.info
+        else:
+            log_call = logger.debug
+
         if fva_mu_c is None and composition_agnostic:
             logger.debug(f"Setting fva_mu_c to 0 and fraction_of_optimum to 0")
             fva_mu_c = 0.
@@ -1799,17 +1804,11 @@ class CommunityModel:
             fraction_of_optimum = 1.
 
         if only_exchange_reactions:
-            if verbose:
-                logger.info(f"Setting reactions to be analysed to exchange reactions only")
-            else:
-                logger.debug("Setting reactions to be analysed to exchange reactions only")
+            log_call("Setting reactions to be analysed to exchange reactions only")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]))
         elif reactions is None:
-            if verbose:
-                logger.info(f"Setting reactions to be analysed to all non-fraction-reactions")
-            else:
-                logger.debug("Setting reactions to be analysed to all non-fraction-reactions")
+            log_call("Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
 
         if fva_mu_c is not None:
@@ -1833,20 +1832,14 @@ class CommunityModel:
                         replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
 
                 if loopless:
-                    if verbose:
-                        logger.info(f"Running loopless FVA")
-                    else:
-                        logger.debug("Running loopless FVA")
+                    log_call("Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
                                                     use_loop_reactions_for_ko=True,
                                                     verbose=verbose,
                                                     processes=processes)
                 else:
-                    if verbose:
-                        logger.info(f"Running FVA")
-                    else:
-                        logger.debug("Running FVA")
+                    log_call("Running FVA")
                     solution_df = fva(self,
                                       reactions,
                                       fraction_of_optimum=fraction_of_optimum,
@@ -1878,16 +1871,14 @@ class CommunityModel:
                         replace_metabolite_stoichiometry(biomass_rxn, {fraction_met: 0})
 
                 if loopless:
-                    if verbose:
-                        logger.info(f"Running loopless FVA")
+                    log_call(f"Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
                                                     use_loop_reactions_for_ko=True,
                                                     verbose=verbose,
                                                     processes=processes)
                 else:
-                    if verbose:
-                        logger.info(f"Running FVA")
+                    log_call(f"Running FVA")
                     solution_df = fva(self,
                                       reactions,
                                       fraction_of_optimum=fraction_of_optimum,
@@ -1903,20 +1894,14 @@ class CommunityModel:
         else:
             logger.debug(f"fva_mu_c is None: {fva_mu_c}")
             if loopless:
-                if verbose:
-                    logger.info(f"Running loopless FVA")
-                else:
-                    logger.debug(f"Running loopless FVA")
+                log_call(f"Running loopless FVA")
                 solution_df = self.loopless_fva(reactions,
                                                 fraction_of_optimum=fraction_of_optimum,
                                                 use_loop_reactions_for_ko=True,
                                                 verbose=verbose,
                                                 processes=processes)
             else:
-                if verbose:
-                    logger.info(f"Running FVA")
-                else:
-                    logger.debug(f"Running FVA")
+                log_call(f"Running FVA")
                 solution_df = fva(self,
                                   reactions,
                                   fraction_of_optimum=fraction_of_optimum,
@@ -2209,26 +2194,26 @@ class CommunityModel:
                        "num_loop_reactions": num_loop_reactions
                        }
         if verbose:
-            print(f"Name: {self.name}")
-            print("------------------")
-            print("Model overview")
-            print(f"Model structure: {model_structure}")
-            print(f"# Metabolites: {num_metabolites}")
-            print(f"# Constraint (f-) Metabolites: {num_f_metabolites}")
-            print(f"# Model Metabolites: {num_model_metabolites}")
-            print(f"# Reactions: {num_reactions}")
-            print(f"# Constraint (f-) Reactions: {num_f_reactions}")
-            print(f"# Model Reactions: {num_model_reactions}")
-            print(f"# Genes: {num_genes}")
-            print(f"# Members: {num_members}")
-            print(f"Members:")
+            logger.info(f"Name: {self.name}")
+            logger.info("------------------")
+            logger.info("Model overview")
+            logger.info(f"Model structure: {model_structure}")
+            logger.info(f"# Metabolites: {num_metabolites}")
+            logger.info(f"# Constraint (f-) Metabolites: {num_f_metabolites}")
+            logger.info(f"# Model Metabolites: {num_model_metabolites}")
+            logger.info(f"# Reactions: {num_reactions}")
+            logger.info(f"# Constraint (f-) Reactions: {num_f_reactions}")
+            logger.info(f"# Model Reactions: {num_model_reactions}")
+            logger.info(f"# Genes: {num_genes}")
+            logger.info(f"# Members: {num_members}")
+            logger.info(f"Members:")
             for member in member_names:
-                print(f"\t{member}")
-            print(f"Objective in direction {objective_direction}:\n\t{objective_expression}")
-            print("------------------")
-            print("Model quality")
-            print(f"# Reactions unbalanced: {num_unbalanced_reactions}")
-            print(f"# Reactions able to carry flux without a medium: {num_loop_reactions}")
+                logger.info(f"\t{member}")
+            logger.info(f"Objective in direction {objective_direction}:\n\t{objective_expression}")
+            logger.info("------------------")
+            logger.info("Model quality")
+            logger.info(f"# Reactions unbalanced: {num_unbalanced_reactions}")
+            logger.info(f"# Reactions able to carry flux without a medium: {num_loop_reactions}")
 
         return report_dict
 

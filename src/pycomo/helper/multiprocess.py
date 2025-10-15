@@ -213,39 +213,27 @@ def loopless_fva(pycomo_model,
     """
 
     if verbose:
-        logger.info("Starting loopless FVA")
+        log_call = logger.info
     else:
-        logger.debug("Starting loopless FVA")
-    if verbose:
-        logger.info("Preparing model")
-    else:
-        logger.debug("Preparing model")
+        log_call = logger.debug
+    
+    log_call("Starting loopless FVA")
+
+    log_call("Preparing model")
 
     reaction_ids = [r.id for r in reactions]
 
     with pycomo_model.model:  # Revert changes to the model after fva
-        if verbose:
-            logger.info("Model prepared")
-        else:
-            logger.debug("Model prepared")
+        log_call("Model prepared")
         if use_loop_reactions_for_ko:
-            if verbose:
-                logger.info("Searching for reactions that are part of loops")
-            else:
-                logger.debug("Searching for reactions that are part of loops")
+            log_call("Searching for reactions that are part of loops")
             ko_candidate_ids = list(pycomo_model.get_loops(processes=processes)["reaction"])
-            if verbose:
-                logger.info(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
-            else:
-                logger.debug(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
+            log_call(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
         elif ko_candidate_ids is None:
             ko_candidate_ids = [r.id for r in pycomo_model.model.reactions]
 
         if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
-            if verbose:
-                logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
-            else:
-                logger.debug(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
+            log_call(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
             fraction_of_optimum = float(fraction_of_optimum)
             if not (0. <= fraction_of_optimum <= 1.):
                 logger.warning(f"fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
@@ -442,27 +430,20 @@ def fva(pycomo_model,
     """
 
     if verbose:
-        logger.info("Starting FVA")
+        log_call = logger.info
     else:
-        logger.debug("Starting FVA")
-    if verbose:
-        logger.info("Preparing model")
-    else:
-        logger.debug("Preparing model")
+        log_call = logger.debug
+
+    log_call("Starting FVA")
+    log_call("Preparing model")
 
     reaction_ids = [r.id for r in reactions]
 
     with pycomo_model.model:  # Revert changes to the model after fva
-        if verbose:
-            logger.info("Model prepared")
-        else:
-            logger.debug("Model prepared")
+        log_call("Model prepared")
 
         if fraction_of_optimum is not None:  # Set the fraction of optimum as constraints
-            if verbose:
-                logger.info(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
-            else:
-                logger.debug(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
+            log_call(f"Setting the fraction of the optimum to {fraction_of_optimum * 100}%")
             fraction_of_optimum = float(fraction_of_optimum)
             if not (0. <= fraction_of_optimum <= 1.):
                 logger.warning(f"fraction_of_optimum is either not numerical or outside the range of 0 - 1.\n"
