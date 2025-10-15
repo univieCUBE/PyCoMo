@@ -639,32 +639,30 @@ def _find_loop_step(rxn_id, status_dict=None):
     try:
         pid = os.getpid()
         if status_dict is not None:
-            status_dict[pid] = {"status": "Starting", "timestamp": time.time(), "target": rxn_id}
-            status_dict[pid]["status"] = f"Starting find_loop_step for {rxn_id}"
+            status_dict[pid] = {"status": f"Starting find_loop_step for {rxn_id}", "timestamp": time.time(), "target": rxn_id}
         logger.debug(f"{pid}: Starting {rxn_id}")
         rxn = _model.reactions.get_by_id(rxn_id)
         _model.objective = rxn.id
         if status_dict is not None:
-            status_dict[pid]["status"] = f"Minimize {rxn_id}"
-            status_dict[pid]["timestamp"] = time.time()
+            status_dict[pid] = {"status": f"Minimize {rxn_id}", "timestamp": time.time(), "target": rxn_id}
         #logger.debug(f"{pid}: Starting minimize {rxn_id}")
         solution = _model.optimize("minimize")
         logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
         min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
         if status_dict is not None:
-            status_dict[pid]["status"] = f"Maximize {rxn_id}"
-            status_dict[pid]["timestamp"] = time.time()
+            status_dict[pid] = {"status": f"Maximize {rxn_id}", "timestamp": time.time(), "target": rxn_id}
         #logger.debug(f"{pid}: Starting maximize {rxn_id}")
         solution = _model.optimize("maximize")
         logger.debug(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
         max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
         if status_dict is not None:
-            status_dict[pid]["status"] = f"Finished {rxn_id}"
-            status_dict[pid]["timestamp"] = time.time()
+            status_dict[pid] = {"status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id}
         logger.debug(f"{pid}: Finished {rxn_id}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
         logger.error(f"{pid}: Error thrown in FVA step {rxn_id}")
+        if status_dict is not None:
+            status_dict[pid] = {"status": f"Error at {rxn_id}", "timestamp": time.time(), "target": rxn_id}
         return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
@@ -745,7 +743,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                             logger.debug(f"Worker {pid}: {info['status']}")
                             if time.time() - info["timestamp"] > 30:
                                 logger.warning(f"Worker {pid} may be deadlocked (no update for 30s)")
-                    time.sleep(2)  # Wait before next check
+                    time.sleep(min(2*rounds_since_last_result, 30))  # Wait before next check
             # for input_rxn, res in zip(reaction_ids, async_results):
             #     try:
             #         res_tuple = res.get(timeout=time_out)
