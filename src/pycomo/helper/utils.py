@@ -8,6 +8,7 @@ import re
 import numpy as np
 from pycomo.helper.spawnprocesspool import SpawnProcessPool
 import multiprocessing
+import queue as _queue  # for Queue.Empty when draining status queue
 from cobra.core import Configuration
 import time
 import traceback
@@ -650,34 +651,38 @@ def _init_loop_worker(model, log_queue=None, logger_conf=None):
     logger.debug(f"Worker {pid} initialized.")
 
 
-def _find_loop_step(rxn_id, status_dict=None):
+def _find_loop_step(rxn_id, status_queue=None):
     try:
         pid = os.getpid()
-        if status_dict is not None:
-            status_dict[pid] = {"status": f"Starting find_loop_step for {rxn_id}", "timestamp": time.time(), "target": rxn_id}
+        if status_queue is not None:
+            status_queue.put({"pid": pid, "status": f"Starting find_loop_step for {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         logger.debug(f"{pid}: Starting {rxn_id}")
         rxn = _model.reactions.get_by_id(rxn_id)
         _model.objective = rxn.id
-        if status_dict is not None:
-            status_dict[pid] = {"status": f"Minimize {rxn_id}", "timestamp": time.time(), "target": rxn_id}
+        if status_queue is not None:
+            status_queue.put({"pid": pid, "status": f"Minimize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         #logger.debug(f"{pid}: Starting minimize {rxn_id}")
         solution = _model.optimize("minimize")
-        logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+        #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+        if solution.status != "optimal":
+            logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
         min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if status_dict is not None:
-            status_dict[pid] = {"status": f"Maximize {rxn_id}", "timestamp": time.time(), "target": rxn_id}
+        if status_queue is not None:
+            status_queue.put({"pid": pid, "status": f"Maximize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         #logger.debug(f"{pid}: Starting maximize {rxn_id}")
         solution = _model.optimize("maximize")
-        logger.debug(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
+        #logger.debug(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
+        if solution.status != "optimal":
+            logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
         max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if status_dict is not None:
-            status_dict[pid] = {"status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id}
+        if status_queue is not None:
+            status_queue.put({"pid": pid, "status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         logger.debug(f"{pid}: Finished {rxn_id}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
         logger.error(f"{pid}: Error thrown in FVA step {rxn_id}")
-        if status_dict is not None:
-            status_dict[pid] = {"status": f"Error at {rxn_id}", "timestamp": time.time(), "target": rxn_id}
+        if status_queue is not None:
+            status_queue.put({"pid": pid, "status": f"Error at {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
@@ -709,6 +714,9 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     # Use "spawn" here because SpawnProcessPool typically uses spawn; if your pool uses "fork" change accordingly.
     ctx = multiprocessing.get_context("spawn")
     log_queue = ctx.Queue(-1)        # create queue from same context
+    manager = ctx.Manager()
+    status_queue = manager.Queue()       # <<--- new status queue (workers push short status messages here)
+
 
     # exclude any QueueHandler that might already be attached to avoid loops
     listener_handlers = [h for h in logger.handlers if not isinstance(h, QueueHandler)]
@@ -722,34 +730,44 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             chunk_size = len(reaction_ids) // processes
             time_out_step = min(100, int((max_time_out-time_out)/2.))
             failed_tasks = []
-            manager = multiprocessing.Manager()
-            status_dict = manager.dict()
+            #manager = multiprocessing.Manager()
+            #status_dict = manager.dict()
             
             with SpawnProcessPool(
                     processes,
                     initializer=_init_loop_worker,
                     initargs=(tuple([loop_model, log_queue, get_logger_conf()])),
             ) as pool:
-                async_results = [pool.apply_async(_find_loop_step, args=(r,status_dict)) for r in reaction_ids]
+                async_results = [pool.apply_async(_find_loop_step, args=(r,status_queue)) for r in reaction_ids]
                 pending = list(zip(reaction_ids, async_results))
                 last_processed = processed_rxns
 
                 rounds_since_last_result = 0
+                # local dict to hold latest status per worker pid
+                statuses = {}
                 while pending:
+                    # drain status_queue (non-blocking) to update local statuses immediately
+                    try:
+                        while True:
+                            msg = status_queue.get_nowait()
+                            statuses[msg["pid"]] = msg
+                    except _queue.Empty:
+                        pass
+
                     found_result = False
-                    if len(status_dict) == 0:
-                        logger.debug("No workers active - trying again")
-                        time.sleep(1)
-                        continue
+                    # if len(statuses) == 0:
+                    #     logger.debug("No workers active - trying again")
+                    #     time.sleep(1)
+                    #     continue
                     for i, (input_rxn, res) in enumerate(pending):
                         try:
                             res_tuple = res.get(timeout=0.00001)  # Short timeout
                             rxn_id, max_flux, min_flux = res_tuple
                             processed_rxns += 1
                             rounds_since_last_result = 0
-                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                            if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                                for pid, info in status_dict.items():
+                                for pid, info in statuses.items():
                                     logger.debug(f"Worker {pid}: {info}")
                             if min_flux != 0. or max_flux != 0.:
                                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
@@ -764,11 +782,11 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     if not found_result:
                         rounds_since_last_result += 1
                         # No new result, display status queue
-                        logger.debug(f"No new results, current worker status: {status_dict}")
-                        if len(status_dict) == 0:
+                        logger.debug(f"No new results, current worker status: {statuses}")
+                        if len(statuses) == 0:
                             logger.debug("No workers active - trying again")
                         else:
-                            for pid, info in status_dict.items():
+                            for pid, info in statuses.items():
                                 logger.debug(f"Worker {pid}: {info['status']}")
                                 if time.time() - info["timestamp"] > 30:
                                     logger.warning(f"Worker {pid} may be deadlocked (no update for 30s)")
@@ -791,7 +809,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
                     while failed_tasks and time_out <= max_time_out:
                         repeat_failed_tasks = []
-                        async_results = [pool.apply_async(_find_loop_step, args=(r,status_dict)) for r in failed_tasks]
+                        async_results = [pool.apply_async(_find_loop_step, args=(r,status_queue)) for r in failed_tasks]
                         for input_rxn, res in zip(failed_tasks, async_results):
                             try:
                                 res_tuple = res.get(timeout=time_out)
