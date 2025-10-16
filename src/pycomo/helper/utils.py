@@ -705,9 +705,9 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             pending = list(zip(reaction_ids, async_results))
             last_processed = processed_rxns
 
+            rounds_since_last_result = 0
             while pending:
                 found_result = False
-                rounds_since_last_result = 0
                 if len(status_dict) == 0:
                     logger.debug("No workers active - trying again")
                     time.sleep(1)
@@ -796,6 +796,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
 
     loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
+    logger.info("Loop detection finished")
     return loops_df
 
 
