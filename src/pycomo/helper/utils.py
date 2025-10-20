@@ -859,12 +859,14 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             logger.warning(f"Stopping active child processes raised an exception: {e}")
 
         # Stop the QueueListener. 
+        logger.info(f"Stopping queue listener.")
         try:
             listener.stop()
         except Exception as exc:
             logger.warning(f"QueueListener.stop() raised: {exc}")
 
         # Close the log queue
+        logger.info(f"Closing log queue")
         try:
             log_queue.close()
             log_queue.cancel_join_thread()
@@ -872,6 +874,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             logger.warning(f"Closing the log queue raised an exception: {e}")
 
         # Shutdown the manager that backs status_queue (if available)
+        logger.info(f"Shutting down manager")
         try:
             # Manager.shutdown() will stop the manager process and its queues
             manager.shutdown()
