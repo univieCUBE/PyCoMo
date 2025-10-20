@@ -713,8 +713,8 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     # This ensures the Queue/Manager and the worker pool use the same start-method and do not mix SemLocks.
     # Use "spawn" here because SpawnProcessPool typically uses spawn; if your pool uses "fork" change accordingly.
     ctx = multiprocessing.get_context("spawn")
-    log_queue = ctx.Queue(-1)        # create queue from same context
     manager = ctx.Manager()
+    log_queue = ctx.Queue(-1)        # create queue from same context
     status_queue = manager.Queue()       # <<--- new status queue (workers push short status messages here)
 
 
@@ -847,8 +847,9 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
     finally:
         # ensure listener is always stopped
-        logger.info(f"Worker listener ended.")
+        logger.info(f"Ending worker listener.")
         listener.stop()
+        logger.info(f"Worker listener ended.")
 
 
     loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
