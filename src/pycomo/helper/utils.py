@@ -767,6 +767,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                             rounds_since_last_result = 0
                             if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                                logger.info(f"")
                                 for pid, info in statuses.items():
                                     logger.debug(f"Worker {pid}: {info}")
                             if min_flux != 0. or max_flux != 0.:
@@ -803,6 +804,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                 #     except multiprocessing.TimeoutError:
                 #         logger.warning(f"Find loops step timed out for rxn {input_rxn}")
                 #         failed_tasks.append(input_rxn)
+                logger.info(f"While pending closed!")
                 if failed_tasks:
                     time_out += time_out_step
                     time_out = min(max_time_out, time_out)
@@ -835,6 +837,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         if min_flux != 0. or max_flux != 0.:
                             loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
         else:
+            logger.info(f"Running find loops in single core mode")
             _init_loop_worker(loop_model)
             for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
                 processed_rxns += 1
@@ -844,6 +847,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
     finally:
         # ensure listener is always stopped
+        logger.info(f"Worker listener ended.")
         listener.stop()
 
 
