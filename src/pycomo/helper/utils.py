@@ -826,6 +826,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         time_out += time_out_step
                     logger.error(f"Find loops failed for several reactions:\n{failed_tasks}")
                     # Single core fallback
+                    _init_loop_worker(loop_model)
                     logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
                     for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
                         processed_rxns += 1
