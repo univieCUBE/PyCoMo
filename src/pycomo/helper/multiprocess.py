@@ -346,6 +346,7 @@ def loopless_fva(pycomo_model,
                     logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
                     # Single core fallback
                     logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                    _init_fva_worker(pycomo_model.model, ko_candidate_ids)
                     for res_tuple in map(_loopless_fva_step, failed_tasks):
                         if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                             logger.error(f"Worker error captured:\n{res_tuple}")
@@ -553,6 +554,7 @@ def fva(pycomo_model,
                     logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
                     # Single core fallback
                     logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                    _init_fva_worker(pycomo_model.model, [])
                     for res_tuple in map(_fva_step, failed_tasks):
                         if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                             logger.error(f"Worker error captured:\n{res_tuple}")
