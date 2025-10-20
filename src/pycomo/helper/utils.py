@@ -677,7 +677,7 @@ def _find_loop_step(rxn_id, status_queue=None):
         max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
         if status_queue is not None:
             status_queue.put({"pid": pid, "status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id})
-        logger.debug(f"{pid}: Finished {rxn_id}")
+        #logger.debug(f"{pid}: Finished {rxn_id}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
         logger.error(f"{pid}: Error thrown in FVA step {rxn_id}")
