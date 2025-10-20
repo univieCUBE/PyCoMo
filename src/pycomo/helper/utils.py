@@ -767,7 +767,6 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                             rounds_since_last_result = 0
                             if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                                logger.info(f"")
                                 for pid, info in statuses.items():
                                     logger.debug(f"Worker {pid}: {info}")
                             if min_flux != 0. or max_flux != 0.:
@@ -848,8 +847,36 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     finally:
         # ensure listener is always stopped
         logger.info(f"Ending worker listener.")
-        listener.stop()
-        logger.info(f"Worker listener ended.")
+        # Defensive: terminate any lingering child processes
+        try:
+            for p in multiprocessing.active_children():
+                try:
+                    p.terminate()
+                    p.join(timeout=0.1)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Stopping active child processes raised an exception: {e}")
+
+        # Stop the QueueListener. 
+        try:
+            listener.stop()
+        except Exception as exc:
+            logger.warning(f"QueueListener.stop() raised: {exc}")
+
+        # Close the log queue
+        try:
+            log_queue.close()
+            log_queue.cancel_join_thread()
+        except Exception as e:
+            logger.warning(f"Closing the log queue raised an exception: {e}")
+
+        # Shutdown the manager that backs status_queue (if available)
+        try:
+            # Manager.shutdown() will stop the manager process and its queues
+            manager.shutdown()
+        except Exception as e:
+            logger.warning(f"Manager raised exception during shutdown: {e}")
 
 
     loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
