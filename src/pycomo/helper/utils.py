@@ -617,7 +617,7 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def _init_loop_worker(model, log_queue=None, logger_conf=None):
+def _init_loop_worker(model, status_queue=None, logger_conf=None):
     """
     Initialize a global model object for multiprocessing and attach a QueueHandler
     so that worker logging goes into the provided multiprocessing queue.
@@ -628,61 +628,123 @@ def _init_loop_worker(model, log_queue=None, logger_conf=None):
     """
 
     global _model
+    global _status_queue
     _model = model
+    _status_queue = status_queue
     pid = os.getpid()
     # If a log queue is provided, replace handlers with a QueueHandler so that
     # all logging is forwarded to the main process via the queue.
-    if log_queue is not None:
-        qh = QueueHandler(log_queue)
-        root = logging.getLogger()
-        # Remove any existing handlers in worker and attach the queue handler
-        for h in list(root.handlers):
-            root.removeHandler(h)
-        root.addHandler(qh)
-        root.setLevel(logging.DEBUG)
+    # if log_queue is not None:
+    #     qh = QueueHandler(log_queue)
+    #     root = logging.getLogger()
+    #     # Remove any existing handlers in worker and attach the queue handler
+    #     for h in list(root.handlers):
+    #         root.removeHandler(h)
+    #     root.addHandler(qh)
+    #     root.setLevel(logging.DEBUG)
+    # else:
+    if logger_conf is not None:
+        # logging.basicConfig(
+        #     #filename=f'pycomo_worker_{pid}.log',
+        #     level=logging.INFO,
+        #     format='%(asctime)s %(process)d %(levelname)s %(message)s'
+        # )
+        configure_logger(logger_conf[0], logger_conf[1])
+    if _status_queue is not None:
+        _status_queue.put({"verbosity": "debug",
+                          "pid": pid,
+                          "status": f"Worker {pid} initialized.", 
+                          "timestamp": time.time(), 
+                          "target": None})
     else:
-        if logger_conf is not None:
-            # logging.basicConfig(
-            #     #filename=f'pycomo_worker_{pid}.log',
-            #     level=logging.INFO,
-            #     format='%(asctime)s %(process)d %(levelname)s %(message)s'
-            # )
-            configure_logger(logger_conf[0], logger_conf[1])
-    logger.debug(f"Worker {pid} initialized.")
+        logger.debug(f"Worker {pid} initialized.")
 
 
-def _find_loop_step(rxn_id, status_queue=None):
+def _find_loop_step(rxn_id, check_feasibility=True):
     try:
         pid = os.getpid()
-        if status_queue is not None:
-            status_queue.put({"pid": pid, "status": f"Starting find_loop_step for {rxn_id}", "timestamp": time.time(), "target": rxn_id})
-        logger.debug(f"{pid}: Starting {rxn_id}")
+        if _status_queue is not None:
+            _status_queue.put({"verbosity": "debug", "pid": pid, "status": f"Starting find_loop_step for {rxn_id}", "timestamp": time.time(), "target": rxn_id})
+        else:
+            logger.debug(f"{pid}: Starting {rxn_id}")
         rxn = _model.reactions.get_by_id(rxn_id)
         _model.objective = rxn.id
-        if status_queue is not None:
-            status_queue.put({"pid": pid, "status": f"Minimize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
+        t = 10 * cobra.Configuration().tolerance 
+        if _status_queue is not None:
+            _status_queue.put({"verbosity": "status", "pid": pid, "status": f"Minimize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         #logger.debug(f"{pid}: Starting minimize {rxn_id}")
-        solution = _model.optimize("minimize")
-        #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
-        if solution.status != "optimal":
-            logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
-        min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if status_queue is not None:
-            status_queue.put({"pid": pid, "status": f"Maximize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
-        #logger.debug(f"{pid}: Starting maximize {rxn_id}")
-        solution = _model.optimize("maximize")
-        #logger.debug(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
-        if solution.status != "optimal":
-            logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
-        max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-        if status_queue is not None:
-            status_queue.put({"pid": pid, "status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id})
+
+        if check_feasibility:
+            with _model as temp_model:
+                rxn = temp_model.reactions.get_by_id(rxn_id)
+                if rxn.lower_bound > -t:
+                    min_flux = 0.
+                else:
+                    rxn.upper_bound = -t
+                    temp_model.objective = 0
+                    temp_model.slim_optimize()
+                    if temp_model.solver.status == "infeasible":
+                        min_flux = 0.
+                    elif temp_model.solver.status == "optimal":
+                        min_flux = -1.
+                    else:
+                        if _status_queue is not None:
+                            _status_queue.put({"verbosity": "warning", "pid": pid, "status": f"{pid}: Finished minimize {rxn_id} with status {solution.status}", "timestamp": time.time(), "target": rxn_id})
+                        else:
+                            logger.warning(f"{pid}: Finished minimize {rxn_id} with status {temp_model.solver.status}")
+                        min_flux = float("nan")            
+        else:
+            solution = _model.optimize("minimize")
+            #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+            if solution.status != "optimal":
+                if _status_queue is not None:
+                    _status_queue.put({"verbosity": "warning", "pid": pid, "status": f"{pid}: Finished minimize {rxn_id} with status {solution.status}", "timestamp": time.time(), "target": rxn_id})
+                else:
+                    logger.warning(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+            min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+
+        if _status_queue is not None:
+            _status_queue.put({"verbosity": "status", "pid": pid, "status": f"Maximize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
+
+        if check_feasibility:
+            with _model as temp_model:
+                rxn = temp_model.reactions.get_by_id(rxn_id)
+                if rxn.upper_bound < t:
+                    max_flux = 0.
+                else:
+                    rxn.lower_bound = t
+                    temp_model.objective = 0
+                    temp_model.slim_optimize()
+                    if temp_model.solver.status == "infeasible":
+                        max_flux = 0.
+                    elif temp_model.solver.status == "optimal":
+                        max_flux = 1.
+                    else:
+                        max_flux = float("nan")
+                        if _status_queue is not None:
+                            _status_queue.put({"verbosity": "warning", "pid": pid, "status": f"{pid}: Finished maximize {rxn_id} with status {solution.status}", "timestamp": time.time(), "target": rxn_id})
+                        else:
+                            logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")                                
+        else:
+            solution = _model.optimize("maximize")
+            #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+            if solution.status != "optimal":
+                if _status_queue is not None:
+                    _status_queue.put({"verbosity": "warning", "pid": pid, "status": f"{pid}: Finished maximize {rxn_id} with status {solution.status}", "timestamp": time.time(), "target": rxn_id})
+                else:
+                    logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
+            max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+
+        if _status_queue is not None:
+            _status_queue.put({"verbosity": "status", "pid": pid, "status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id})
         #logger.debug(f"{pid}: Finished {rxn_id}")
         return rxn_id, max_flux, min_flux
     except Exception as e:
-        logger.error(f"{pid}: Error thrown in FVA step {rxn_id}")
-        if status_queue is not None:
-            status_queue.put({"pid": pid, "status": f"Error at {rxn_id}", "timestamp": time.time(), "target": rxn_id})
+        if _status_queue is not None:
+            _status_queue.put({"verbosity": "error", "pid": pid, "status": f"Error at {rxn_id}", "timestamp": time.time(), "target": rxn_id})
+        else:
+            logger.error(f"{pid}: Error thrown in FVA step {rxn_id}: {e}\n{traceback.format_exc()}")
+
         return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
@@ -714,16 +776,16 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     # Use "spawn" here because SpawnProcessPool typically uses spawn; if your pool uses "fork" change accordingly.
     ctx = multiprocessing.get_context("spawn")
     manager = ctx.Manager()
-    log_queue = ctx.Queue(-1)        # create queue from same context
+    #log_queue = manager.Queue(-1)        # create queue from same context
     status_queue = manager.Queue()       # <<--- new status queue (workers push short status messages here)
 
 
     # exclude any QueueHandler that might already be attached to avoid loops
-    listener_handlers = [h for h in logger.handlers if not isinstance(h, QueueHandler)]
+    #listener_handlers = [h for h in logger.handlers if not isinstance(h, QueueHandler)]
 
     # QueueListener will pull LogRecords from log_queue and dispatch them to handlers
-    listener = QueueListener(log_queue, *listener_handlers, respect_handler_level=True)
-    listener.start()
+    #listener = QueueListener(log_queue, *listener_handlers, respect_handler_level=True)
+    #listener.start()
 
     try:
         if processes > 1:
@@ -736,9 +798,9 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             with SpawnProcessPool(
                     processes,
                     initializer=_init_loop_worker,
-                    initargs=(tuple([loop_model, log_queue, get_logger_conf()])),
+                    initargs=(tuple([loop_model, status_queue, get_logger_conf()])),
             ) as pool:
-                async_results = [pool.apply_async(_find_loop_step, args=(r,status_queue)) for r in reaction_ids]
+                async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
                 pending = list(zip(reaction_ids, async_results))
                 last_processed = processed_rxns
 
@@ -751,6 +813,15 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         while True:
                             msg = status_queue.get_nowait()
                             statuses[msg["pid"]] = msg
+                            if msg["verbosity"] in ["info", "debug", "warning", "error"]:
+                                if msg["verbosity"] == "debug":
+                                    logger.debug(f"worker {msg['pid']}: {msg['status']}")
+                                if msg["verbosity"] == "info":
+                                    logger.info(f"worker {msg['pid']}: {msg['status']}")
+                                if msg["verbosity"] == "warning":
+                                    logger.warning(f"worker {msg['pid']}: {msg['status']}")
+                                if msg["verbosity"] == "error":
+                                    logger.error(f"worker {msg['pid']}: {msg['status']}")
                     except _queue.Empty:
                         pass
 
@@ -810,7 +881,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
                     while failed_tasks and time_out <= max_time_out:
                         repeat_failed_tasks = []
-                        async_results = [pool.apply_async(_find_loop_step, args=(r,status_queue)) for r in failed_tasks]
+                        async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in failed_tasks]
                         for input_rxn, res in zip(failed_tasks, async_results):
                             try:
                                 res_tuple = res.get(timeout=time_out)
@@ -846,7 +917,7 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                     loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
     finally:
         # ensure listener is always stopped
-        logger.info(f"Ending worker listener.")
+        #logger.info(f"Ending worker listener.")
         # Defensive: terminate any lingering child processes
         try:
             for p in multiprocessing.active_children():
@@ -859,27 +930,29 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             logger.warning(f"Stopping active child processes raised an exception: {e}")
 
         # Stop the QueueListener. 
-        logger.info(f"Stopping queue listener.")
-        try:
-            listener.stop()
-        except Exception as exc:
-            logger.warning(f"QueueListener.stop() raised: {exc}")
+        #logger.info(f"Stopping queue listener.")
+        # try:
+        #     listener.stop()
+        # except Exception as exc:
+        #     #logger.warning(f"QueueListener.stop() raised: {exc}")
+        #     pass
 
         # Close the log queue
-        logger.info(f"Closing log queue")
-        try:
-            log_queue.close()
-            log_queue.cancel_join_thread()
-        except Exception as e:
-            logger.warning(f"Closing the log queue raised an exception: {e}")
+        # logger.info(f"Closing log queue")
+        # try:
+        #     log_queue.close()
+        #     log_queue.cancel_join_thread()
+        # except Exception as e:
+        #     logger.warning(f"Closing the log queue raised an exception: {e}")
 
         # Shutdown the manager that backs status_queue (if available)
-        logger.info(f"Shutting down manager")
+        logger.debug(f"Shutting down queue manager")
         try:
             # Manager.shutdown() will stop the manager process and its queues
             manager.shutdown()
         except Exception as e:
-            logger.warning(f"Manager raised exception during shutdown: {e}")
+            #logger.warning(f"Manager raised exception during shutdown: {e}")
+            pass
 
 
     loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
