@@ -748,7 +748,7 @@ def _find_loop_step(rxn_id, check_feasibility=True):
         return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
-def find_loops_in_model(model, processes=None, time_out=300, max_time_out=1200, restart_on_stall=True):
+def find_loops_in_model(model, processes=None, time_out=300, max_time_out=None, restart_on_stall=True):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
@@ -762,6 +762,8 @@ def find_loops_in_model(model, processes=None, time_out=300, max_time_out=1200, 
     relax_reaction_constraints_for_zero_flux(loop_model)
     loops = []
     reaction_ids = [r.id for r in loop_model.reactions]
+
+    max_time_out = max(time_out * 2, len(reaction_ids)*0.1)
 
     num_rxns = len(reaction_ids)
 
@@ -887,10 +889,14 @@ def find_loops_in_model(model, processes=None, time_out=300, max_time_out=1200, 
                                         statuses.clear()
                                         rounds_since_last_result = 0
                                         # continue loop with fresh pool
+
+                                        time_out += time_out_step
+                                        time_out = min(max_time_out, time_out)
                                         continue
                                     except Exception as exc:
                                         logger.error(f"Failed to recreate worker pool: {exc}")
                                         raise exc
+                                    
                         time.sleep(min(2*rounds_since_last_result, time_out))  # Wait before next check
                 # for input_rxn, res in zip(reaction_ids, async_results):
                 #     try:
