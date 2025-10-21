@@ -748,7 +748,7 @@ def _find_loop_step(rxn_id, check_feasibility=True):
         return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
-def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
+def find_loops_in_model(model, processes=None, time_out=300, max_time_out=1200, restart_on_stall=True):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
@@ -795,11 +795,12 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
             #manager = multiprocessing.Manager()
             #status_dict = manager.dict()
             
-            with SpawnProcessPool(
-                    processes,
-                    initializer=_init_loop_worker,
-                    initargs=(tuple([loop_model, status_queue, get_logger_conf()])),
-            ) as pool:
+            pool = SpawnProcessPool(
+                processes,
+                initializer=_init_loop_worker,
+                initargs=(tuple([loop_model, status_queue, get_logger_conf()])),
+            )
+            try:
                 async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
                 pending = list(zip(reaction_ids, async_results))
                 last_processed = processed_rxns
@@ -807,6 +808,8 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                 rounds_since_last_result = 0
                 # local dict to hold latest status per worker pid
                 statuses = {}
+                last_restart_at = 0
+
                 while pending:
                     # drain status_queue (non-blocking) to update local statuses immediately
                     try:
@@ -857,11 +860,38 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                         if len(statuses) == 0:
                             logger.debug("No workers active - trying again")
                         else:
-                            for pid, info in statuses.items():
-                                logger.debug(f"Worker {pid}: {info['status']}")
-                                if time.time() - info["timestamp"] > 30:
-                                    logger.warning(f"Worker {pid} may be deadlocked (no update for 30s)")
-                        time.sleep(min(2*rounds_since_last_result, 30))  # Wait before next check
+                            # check for stalled workers
+                            stalled_pids = [pid for pid, info in statuses.items() if time.time() - info["timestamp"] > time_out]
+                            if stalled_pids:
+                                logger.warning(f"Detected stalled worker(s): {stalled_pids} (no update for >{time_out}s)")
+                                if restart_on_stall:
+                                    logger.info("Restarting worker pool due to stalled workers.")
+                                    # terminate current pool and recreate it
+                                    try:
+                                        pool.terminate()
+                                    except Exception as exc:
+                                        logger.warning(f"Exception when terminating pool: {exc}")
+                                    try:
+                                        pool.join()
+                                    except Exception:
+                                        logger.warning(f"Exception when joining pool: {exc}")
+                                    # rebuild pool and re-submit pending tasks
+                                    try:
+                                        pool = SpawnProcessPool(
+                                            processes,
+                                            initializer=_init_loop_worker,
+                                            initargs=(tuple([loop_model, status_queue, get_logger_conf()])),
+                                        )
+                                        async_results = [pool.apply_async(_find_loop_step, args=(rxn,)) for rxn, _ in pending]
+                                        pending = list(zip([rxn for rxn, _ in pending], async_results))
+                                        statuses.clear()
+                                        rounds_since_last_result = 0
+                                        # continue loop with fresh pool
+                                        continue
+                                    except Exception as exc:
+                                        logger.error(f"Failed to recreate worker pool: {exc}")
+                                        raise exc
+                        time.sleep(min(2*rounds_since_last_result, time_out))  # Wait before next check
                 # for input_rxn, res in zip(reaction_ids, async_results):
                 #     try:
                 #         res_tuple = res.get(timeout=time_out)
@@ -906,6 +936,16 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
                             logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
                         if min_flux != 0. or max_flux != 0.:
                             loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+            finally:
+                # ensure pool is cleaned up
+                try:
+                    pool.terminate()
+                except Exception as exc:
+                    logger.warning(f"Exception when terminating pool: {exc}")
+                try:
+                    pool.join()
+                except Exception:
+                    logger.warning(f"Exception when joining pool: {exc}")
         else:
             logger.info(f"Running find loops in single core mode")
             _init_loop_worker(loop_model)
