@@ -660,7 +660,7 @@ def _init_loop_worker(model, status_queue=None, logger_conf=None):
         logger.debug(f"Worker {pid} initialized.")
 
 
-def _find_loop_step(rxn_id, check_feasibility=True):
+def _find_loop_step(rxn_id, check_feasibility=False):
     try:
         pid = os.getpid()
         if _status_queue is not None:
