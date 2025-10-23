@@ -343,20 +343,21 @@ def loopless_fva(pycomo_model,
                             logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
                         failed_tasks = repeat_failed_tasks
                         time_out += time_out_step
-                    logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
-                    # Single core fallback
-                    logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
-                    _init_fva_worker(pycomo_model.model, ko_candidate_ids)
-                    for res_tuple in map(_loopless_fva_step, failed_tasks):
-                        if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
-                            logger.error(f"Worker error captured:\n{res_tuple}")
-                            raise ValueError(f"Worker error captured:\n{res_tuple}")
-                        rxn_id, max_flux, min_flux = res_tuple
-                        processed_rxns += 1
-                        if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                        result.at[rxn_id, "maximum"] = max_flux
-                        result.at[rxn_id, "minimum"] = min_flux
+                    if failed_tasks:
+                        logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
+                        # Single core fallback
+                        logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                        _init_fva_worker(pycomo_model.model, ko_candidate_ids)
+                        for res_tuple in map(_loopless_fva_step, failed_tasks):
+                            if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                                logger.error(f"Worker error captured:\n{res_tuple}")
+                                raise ValueError(f"Worker error captured:\n{res_tuple}")
+                            rxn_id, max_flux, min_flux = res_tuple
+                            processed_rxns += 1
+                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                            result.at[rxn_id, "maximum"] = max_flux
+                            result.at[rxn_id, "minimum"] = min_flux
         else:
             _init_fva_worker(pycomo_model.model, ko_candidate_ids)
             for res_tuple in map(_loopless_fva_step, reaction_ids):
@@ -551,20 +552,21 @@ def fva(pycomo_model,
                                 repeat_failed_tasks.append(input_rxn)
                         failed_tasks = repeat_failed_tasks
                         time_out += time_out_step
-                    logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
-                    # Single core fallback
-                    logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
-                    _init_fva_worker(pycomo_model.model, [])
-                    for res_tuple in map(_fva_step, failed_tasks):
-                        if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
-                            logger.error(f"Worker error captured:\n{res_tuple}")
-                            raise ValueError(f"Worker error captured:\n{res_tuple}")
-                        rxn_id, max_flux, min_flux = res_tuple
-                        processed_rxns += 1
-                        if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                        result.at[rxn_id, "maximum"] = max_flux
-                        result.at[rxn_id, "minimum"] = min_flux
+                    if failed_tasks:
+                        logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
+                        # Single core fallback
+                        logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                        _init_fva_worker(pycomo_model.model, [])
+                        for res_tuple in map(_fva_step, failed_tasks):
+                            if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                                logger.error(f"Worker error captured:\n{res_tuple}")
+                                raise ValueError(f"Worker error captured:\n{res_tuple}")
+                            rxn_id, max_flux, min_flux = res_tuple
+                            processed_rxns += 1
+                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                            result.at[rxn_id, "maximum"] = max_flux
+                            result.at[rxn_id, "minimum"] = min_flux
         else:
             _init_fva_worker(pycomo_model.model, [])
             for res_tuple in map(_fva_step, reaction_ids):
