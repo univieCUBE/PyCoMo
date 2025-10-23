@@ -306,7 +306,7 @@ def loopless_fva(pycomo_model,
                             raise ValueError(f"Worker error captured:\n{res_tuple}")
                         rxn_id, max_flux, min_flux = res_tuple
                         processed_rxns += 1
-                        if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                        if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                             logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                         result.at[rxn_id, "maximum"] = max_flux
                         result.at[rxn_id, "minimum"] = min_flux
@@ -332,7 +332,7 @@ def loopless_fva(pycomo_model,
                                 res_tuple = res.get(timeout=time_out)
                                 rxn_id, max_flux, min_flux = res_tuple
                                 processed_rxns += 1
-                                if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                     logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                                 result.at[rxn_id, "maximum"] = max_flux
                                 result.at[rxn_id, "minimum"] = min_flux
@@ -356,7 +356,7 @@ def loopless_fva(pycomo_model,
                                 raise ValueError(f"Worker error captured:\n{res_tuple}")
                             rxn_id, max_flux, min_flux = res_tuple
                             processed_rxns += 1
-                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                            if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                             result.at[rxn_id, "maximum"] = max_flux
                             result.at[rxn_id, "minimum"] = min_flux
@@ -368,7 +368,7 @@ def loopless_fva(pycomo_model,
                     raise ValueError(f"Worker error captured:\n{res_tuple}")
                 rxn_id, max_flux, min_flux = res_tuple
                 processed_rxns += 1
-                if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                     logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                 result.at[rxn_id, "maximum"] = max_flux
                 result.at[rxn_id, "minimum"] = min_flux
@@ -520,7 +520,7 @@ def fva(pycomo_model,
                             raise ValueError(f"Worker error captured:\n{res_tuple}")
                         rxn_id, max_flux, min_flux = res_tuple
                         processed_rxns += 1
-                        if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                        if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                             logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                         result.at[rxn_id, "maximum"] = max_flux
                         result.at[rxn_id, "minimum"] = min_flux
@@ -545,7 +545,7 @@ def fva(pycomo_model,
                                 res_tuple = res.get(timeout=time_out)
                                 rxn_id, max_flux, min_flux = res_tuple
                                 processed_rxns += 1
-                                if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                     logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                                 result.at[rxn_id, "maximum"] = max_flux
                                 result.at[rxn_id, "minimum"] = min_flux
@@ -565,7 +565,7 @@ def fva(pycomo_model,
                                 raise ValueError(f"Worker error captured:\n{res_tuple}")
                             rxn_id, max_flux, min_flux = res_tuple
                             processed_rxns += 1
-                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                            if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                             result.at[rxn_id, "maximum"] = max_flux
                             result.at[rxn_id, "minimum"] = min_flux
@@ -577,7 +577,7 @@ def fva(pycomo_model,
                     raise ValueError(f"Worker error captured:\n{res_tuple}")
                 rxn_id, max_flux, min_flux = res_tuple
                 processed_rxns += 1
-                if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                     logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                 result.at[rxn_id, "maximum"] = max_flux
                 result.at[rxn_id, "minimum"] = min_flux
