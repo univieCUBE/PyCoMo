@@ -19,7 +19,7 @@ from .helper.utils import *
 from .helper.cli import *
 from .helper.multiprocess import *
 
-logger = logging.getLogger("pycomo")
+logger = logging.getLogger(get_logger_name())
 
 
 class SingleOrganismModel:

@@ -14,9 +14,9 @@ import time
 import traceback
 import logging
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
-from pycomo.helper.logger import configure_logger, get_logger_conf
+from pycomo.helper.logger import configure_logger, get_logger_conf, get_logger_name, get_logger
 
-logger = logging.getLogger("pycomo")
+logger = logging.getLogger(get_logger_name())
 logger.info('Utils Logger initialized.')
 
 configuration = Configuration()
@@ -649,7 +649,8 @@ def _init_loop_worker(model, status_queue=None, logger_conf=None):
         #     level=logging.INFO,
         #     format='%(asctime)s %(process)d %(levelname)s %(message)s'
         # )
-        configure_logger(logger_conf[0], logger_conf[1])
+        get_logger(logger_conf[0])
+        configure_logger(logger_conf[1], logger_conf[2])
     if _status_queue is not None:
         _status_queue.put({"verbosity": "debug",
                           "pid": pid,

@@ -10,7 +10,7 @@ import traceback
 
 import time
 from .utils import get_f_reactions, find_incoherent_bounds
-from .logger import configure_logger, get_logger_conf
+from .logger import configure_logger, get_logger_conf, get_logger_name, get_logger
 
 import cobra
 from cobra.core import Configuration
@@ -19,7 +19,7 @@ from pycomo.helper.spawnprocesspool import SpawnProcessPool
 if TYPE_CHECKING:
     from cobra import Model
 
-logger = logging.getLogger("pycomo")
+logger = logging.getLogger(get_logger_name())
 logger.info('Multiprocess Logger initialized.')
 
 configuration = Configuration()
@@ -42,7 +42,8 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf=None) -
     _exchg_rxn_set = set(_model.exchanges)
     _ll_candidates = set(_model.reactions.get_by_any(ko_candidate_ids))
     if logger_conf is not None:
-        configure_logger(logger_conf[0], logger_conf[1])
+        get_logger(logger_conf[0])
+        configure_logger(logger_conf[1], logger_conf[2])
     logger.debug(f"_init_worker finished in {time.time() - s_time}")
 
 
