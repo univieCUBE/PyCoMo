@@ -750,7 +750,7 @@ def _find_loop_step(rxn_id, check_feasibility=False):
         return f"{pid}: Error: {e}\n{traceback.format_exc()}"
 
 
-def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max_time_out=None, restart_on_stall=True):
+def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max_time_out=None, restart_on_stall=False):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
@@ -768,7 +768,7 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
     else:
         reaction_ids = [r if isinstance(r, str) else r.id for r in reactions]
 
-    max_time_out = max(time_out * 2, len(reaction_ids)*0.1)
+    max_time_out = max(time_out * 2, len(loop_model.reactions)*0.5)
 
     num_rxns = len(reaction_ids)
 
