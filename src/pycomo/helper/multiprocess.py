@@ -37,13 +37,14 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf=None) -
     global _f_rxn_set
     global _exchg_rxn_set
     global _ll_candidates
+    global logger
     _model = model
     _f_rxn_set = set(get_f_reactions(_model))
     _exchg_rxn_set = set(_model.exchanges)
     _ll_candidates = set(_model.reactions.get_by_any(ko_candidate_ids))
     if logger_conf is not None:
-        get_logger(logger_conf[0])
-        configure_logger(logger_conf[1], logger_conf[2])
+        configure_logger(logger_conf[1], logger_conf[2], with_name=logger_conf[0])
+        logger = get_logger(logger_conf[0])
     logger.debug(f"_init_worker finished in {time.time() - s_time}")
 
 

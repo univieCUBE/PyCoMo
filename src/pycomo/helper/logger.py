@@ -64,7 +64,7 @@ def _ensure_file_handler(logger_obj, filepath, level):
     logger_obj.addHandler(fh)
 
 
-def configure_logger(level=None, log_file=None, instance_name=None):
+def configure_logger(level=None, log_file=None, instance_name=None, with_name=None):
     """
     Configure the logger with log-level and/or log file location.
 
@@ -101,8 +101,11 @@ def configure_logger(level=None, log_file=None, instance_name=None):
         # file_handler.setFormatter(file_formatter)
         # logger.addHandler(file_handler)
         # logger.info(f"Log file {log_file} added")
-
-    _logger_name = _make_unique_logger_name(instance_name=instance_name)
+    
+    if with_name is not None:
+        _logger_name = with_name
+    elif _logger_name is None:
+        _logger_name = _make_unique_logger_name(instance_name=instance_name)
     _logger = logging.getLogger(_logger_name)
     _logger.setLevel(log_level)
 
@@ -121,6 +124,7 @@ def get_logger(name=None):
         return logging.getLogger(name)
     if _logger is None:
         configure_logger()
+        _logger.debug(f"Created new logger.")
     return _logger
 
 
@@ -147,10 +151,11 @@ def get_logger_name():
     if _logger_name is None:
         # ensure at least default configured
         configure_logger()
+        _logger.debug(f"Logger name was None. Now {_logger_name}")
     return _logger_name
 
 
-logger = get_logger()
+logger = get_logger(name=_logger_name)
 logger.info("Logger initialized.")
 
 

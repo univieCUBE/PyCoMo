@@ -629,6 +629,7 @@ def _init_loop_worker(model, status_queue=None, logger_conf=None):
 
     global _model
     global _status_queue
+    global logger
     _model = model
     _status_queue = status_queue
     pid = os.getpid()
@@ -649,8 +650,8 @@ def _init_loop_worker(model, status_queue=None, logger_conf=None):
         #     level=logging.INFO,
         #     format='%(asctime)s %(process)d %(levelname)s %(message)s'
         # )
-        get_logger(logger_conf[0])
-        configure_logger(logger_conf[1], logger_conf[2])
+        configure_logger(logger_conf[1], logger_conf[2], with_name=logger_conf[0])
+        logger = get_logger(logger_conf[0])
     if _status_queue is not None:
         _status_queue.put({"verbosity": "debug",
                           "pid": pid,
