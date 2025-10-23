@@ -230,7 +230,7 @@ def loopless_fva(pycomo_model,
         log_call("Model prepared")
         if use_loop_reactions_for_ko:
             log_call("Searching for reactions that are part of loops")
-            ko_candidate_ids = list(pycomo_model.get_loops(processes=processes)["reaction"])
+            ko_candidate_ids = list(pycomo_model.get_loops(reactions=reaction_ids, processes=processes)["reaction"])
             log_call(f"Search complete. {len(ko_candidate_ids)} reactions found in loops. Proceeding with FVA.")
         elif ko_candidate_ids is None:
             ko_candidate_ids = [r.id for r in pycomo_model.model.reactions]

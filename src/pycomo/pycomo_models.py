@@ -1013,12 +1013,13 @@ class CommunityModel:
         """
         return not bool(self.get_unbalanced_reactions())
 
-    def get_loops(self, processes=None):
+    def get_loops(self, reactions=None, processes=None):
         """
         This is a function to find closed loops that can sustain flux without any input or output. Such loops are
         thermodynamically infeasible and biologically nonsensical. Users should be aware of their presence and
         either remove them or check any model solutions for the presence of these cycles.
 
+        :param reactions: The reactions to be checked for being part of loops. Default (None) equals to all reactions of the model
         :param processes: The number of processes to use
         :return: A DataFrame of reactions that carry flux without any metabolite input or output in the model
         """
@@ -1030,7 +1031,7 @@ class CommunityModel:
         self.model.medium = no_medium
 
         with self.model:
-            solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), processes=processes)
+            solution_df = find_loops_in_model(self.convert_to_model_without_fraction_metabolites(), reactions=reactions, processes=processes)
 
         self.medium = original_medium
         self.apply_medium()
