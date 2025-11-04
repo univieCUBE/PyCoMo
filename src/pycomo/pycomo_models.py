@@ -1761,7 +1761,7 @@ class CommunityModel:
                             verbose=verbose,
                             processes=processes)
 
-    def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, fva_mu_c=None,
+    def run_fva(self, fraction_of_optimum=0.9, composition_agnostic=False, loopless=False, use_loop_reactions_for_ko=False, fva_mu_c=None,
                 only_exchange_reactions=True, reactions=None, verbose=False, processes=None):
         """
         Run flux variability on the community metabolic model. By default, only reactions connected to metabolites in
@@ -1836,7 +1836,7 @@ class CommunityModel:
                     log_call("Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
-                                                    use_loop_reactions_for_ko=True,
+                                                    use_loop_reactions_for_ko=use_loop_reactions_for_ko,
                                                     verbose=verbose,
                                                     processes=processes)
                 else:
@@ -1875,7 +1875,7 @@ class CommunityModel:
                     log_call(f"Running loopless FVA")
                     solution_df = self.loopless_fva(reactions,
                                                     fraction_of_optimum=fraction_of_optimum,
-                                                    use_loop_reactions_for_ko=True,
+                                                    use_loop_reactions_for_ko=use_loop_reactions_for_ko,
                                                     verbose=verbose,
                                                     processes=processes)
                 else:
@@ -1898,7 +1898,7 @@ class CommunityModel:
                 log_call(f"Running loopless FVA")
                 solution_df = self.loopless_fva(reactions,
                                                 fraction_of_optimum=fraction_of_optimum,
-                                                use_loop_reactions_for_ko=True,
+                                                use_loop_reactions_for_ko=use_loop_reactions_for_ko,
                                                 verbose=verbose,
                                                 processes=processes)
             else:
@@ -1917,6 +1917,7 @@ class CommunityModel:
                                  fraction_of_optimum=0.9,
                                  composition_agnostic=False,
                                  loopless=True,
+                                 use_loop_reactions_for_ko=False,
                                  processes=None):
         """
         Run flux variability analysis on the current configuration of the community metabolic model and save the
@@ -1932,7 +1933,8 @@ class CommunityModel:
         solution_df = self.run_fva(fraction_of_optimum=fraction_of_optimum,
                                    processes=processes,
                                    composition_agnostic=composition_agnostic,
-                                   loopless=loopless)
+                                   loopless=loopless,
+                                   use_loop_reactions_for_ko=use_loop_reactions_for_ko)
 
         if len(file_path) > 0:
             logger.info(f"Saving flux vector to {file_path}")
@@ -1994,7 +1996,8 @@ class CommunityModel:
                                            fva_mu_c=None,
                                            loopless=True,
                                            processes=None,
-                                           return_flux_vector=False):
+                                           return_flux_vector=False,
+                                           use_loop_reactions_for_ko=False):
         """
         Run flux variability analysis and convert the solution flux ranges into a table of metabolites, including the
         solution flux ranges for the exchange reaction of each metabolite for every community member.
@@ -2015,6 +2018,7 @@ class CommunityModel:
                                    composition_agnostic=composition_agnostic, fva_mu_c=fva_mu_c,
                                    only_exchange_reactions=True,
                                    loopless=loopless,
+                                   use_loop_reactions_for_ko=use_loop_reactions_for_ko,
                                    processes=processes)
         rows = []
         exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
@@ -2102,7 +2106,8 @@ class CommunityModel:
                                        fraction_of_optimum=0.,
                                        loopless=True,
                                        processes=None,
-                                       return_flux_vector=False):
+                                       return_flux_vector=False,
+                                       use_loop_reactions_for_ko=False):
         """
         Calculates all potentially exchanged metabolites between the community members. This can be done via flux
         balance analysis or flux variability analysis.
@@ -2126,14 +2131,16 @@ class CommunityModel:
                                                                                composition_agnostic=True,
                                                                                loopless=loopless,
                                                                                processes=processes,
-                                                                               return_flux_vector=True)
+                                                                               return_flux_vector=True,
+                                                                               use_loop_reactions_for_ko=use_loop_reactions_for_ko)
         else:
             exchange_df, flux_vector = self.cross_feeding_metabolites_from_fva(fraction_of_optimum=fraction_of_optimum,
                                                                                fva_mu_c=fva_mu_c,
                                                                                composition_agnostic=False,
                                                                                loopless=loopless,
                                                                                processes=processes,
-                                                                               return_flux_vector=True)
+                                                                               return_flux_vector=True,
+                                                                               use_loop_reactions_for_ko=use_loop_reactions_for_ko)
 
         if return_flux_vector:
             return self.format_exchg_rxns(exchange_df), flux_vector
@@ -2527,6 +2534,7 @@ def doall(model_folder="",
           return_as_cobra_model=False,
           merge_via_annotation=None,
           loopless=True,
+          use_loop_reactions_for_ko=False,
           num_cores=1):
     """
     This method is meant as an interface for command line access to the functionalities of PyCoMo. It includes
@@ -2651,7 +2659,8 @@ def doall(model_folder="",
                 fraction_of_optimum=fva_solution_threshold,
                 loopless=loopless,
                 processes=num_cores,
-                return_flux_vector=True)
+                return_flux_vector=True,
+                use_loop_reactions_for_ko=use_loop_reactions_for_ko)
             logger.info(f"Saving flux vector to {os.path.join(out_dir, fva_interaction_file)}")
             interaction_df.to_csv(os.path.join(out_dir, fva_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
@@ -2670,7 +2679,8 @@ def doall(model_folder="",
                                                        fraction_of_optimum=fva_solution_threshold,
                                                        processes=num_cores,
                                                        composition_agnostic=composition_agnostic,
-                                                       loopless=loopless)
+                                                       loopless=loopless,
+                                                       use_loop_reactions_for_ko=use_loop_reactions_for_ko)
         except cobra.exceptions.Infeasible:
             logger.warning(f"FVA of community is infeasible. No FVA flux vector file was generated.")
 
@@ -2679,7 +2689,8 @@ def doall(model_folder="",
         logger.info(f"Running FBA")
         try:
             interaction_df, fba_flux_vector = com_model_obj.potential_metabolite_exchanges(fba=True,
-                                                                                           return_flux_vector=True)
+                                                                                           return_flux_vector=True,
+                                                                                           use_loop_reactions_for_ko=use_loop_reactions_for_ko)
             logger.info(f"Saving flux vector to {os.path.join(out_dir, fba_interaction_file)}")
             interaction_df.to_csv(os.path.join(out_dir, fba_interaction_file), sep="\t", header=True,
                                   index=False, float_format='%f')
@@ -2746,6 +2757,7 @@ def main():
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
               loopless=args.loopless,
+              use_loop_reactions_for_ko=args.precompute_loops,
               max_growth_rate_file=args.max_growth_rate_file)
 
     elif len(args.input) == 1 and os.path.isdir(args.input[0]):
@@ -2765,6 +2777,7 @@ def main():
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
               loopless=args.loopless,
+              use_loop_reactions_for_ko=args.precompute_loops,
               max_growth_rate_file=args.max_growth_rate_file)
     else:
         doall(models=args.input,
@@ -2783,6 +2796,7 @@ def main():
               num_cores=args.num_cores,
               composition_agnostic=args.composition_agnostic,
               loopless=args.loopless,
+              use_loop_reactions_for_ko=args.precompute_loops,
               max_growth_rate_file=args.max_growth_rate_file)
 
     logger.info("All done!")
