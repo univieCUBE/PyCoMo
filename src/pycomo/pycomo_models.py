@@ -813,7 +813,7 @@ class CommunityModel:
         :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
         """
         self._f_reactions = self.model.reactions.query(
-            lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id)
+            lambda x: (x.id[:3] == "SK_" and x.id[-3:] in {"_lb", "_ub"}) or "_fraction_reaction" in x.id or x.id == "f_final")
         if self._f_reactions is None:
             self._f_reactions = []
         return self._f_reactions
