@@ -398,10 +398,11 @@ def check_mass_balance_of_metabolites_with_identical_id(model_1, model_2):
     unbalanced_metabolites = []
 
     for met_id in set(exchg_mets_1) & set(exchg_mets_2):
-        equal_mass = check_metabolite_equal_mass(exchg_mets_1[met_id], exchg_mets_2[met_id])
+        exchg_met1 = exchg_mets_1[met_id]
+        exchg_met2 = exchg_mets_2[met_id]
+        equal_mass = check_metabolite_equal_mass(exchg_met1, exchg_met2)
         if not equal_mass:
             unbalanced_metabolites.append(met_id)
-
     return unbalanced_metabolites
 
 
@@ -562,6 +563,31 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
             metabolites_without_overlap.append(met_id)
 
     return metabolites_without_overlap
+
+def get_metabolites_without_elements_from_model(model):
+    """
+    Retrieves all metabolites without elements in a model. This is important for assessing mass balance - 
+    without elements in metabolites, mass balance cannot be calculated.
+
+    :param model: The model to check
+    :return: A list of metabolites without elements
+    """
+    metabolites_without_elements = []
+    for met in model.metabolites:
+        if not check_element_presence_in_metabolite(met):
+            metabolites_without_elements.append(met)
+    return metabolites_without_elements
+
+
+def check_element_presence_in_metabolite(met):
+    """
+    Checks if elements are present in a metabolite. This is important for assessing mass balance - 
+    without elements in metabolites, mass balance cannot be calculated.
+
+    :param met: The metabolite to check
+    :return: True if elements are present, otherwise False
+    """
+    return len(met.elements) > 0
 
 
 def check_mass_balance_fomula_safe(model):

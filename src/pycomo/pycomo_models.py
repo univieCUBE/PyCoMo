@@ -1003,6 +1003,16 @@ class CommunityModel:
                         rxn.annotation["sbo"] = rxn.annotation.get("sbo")[0]
                 unbalanced_reactions = check_mass_balance_fomula_safe(single_reaction_sbo_model)
         return unbalanced_reactions
+    
+    def get_metabolites_without_elements(self):
+        """
+        Retrieves all metabolites without elements from the community model. This is important for assessing mass balance - 
+        without elements in metabolites, mass balance cannot be calculated.
+
+        :return: A list of metabolites without elements
+        """
+        return get_metabolites_without_elements_from_model(self.model)
+
 
     def is_mass_balanced(self):
         """
@@ -1011,6 +1021,9 @@ class CommunityModel:
 
         :return: True if mass and charge balance is achieved, else False
         """
+        elementless_mets = self.get_metabolites_without_elements()
+        if bool(elementless_mets):
+            logger.warning(f"There are {len(elementless_mets)} metabolites without elements in the model. Mass balance checks may be unreliable.")
         return not bool(self.get_unbalanced_reactions())
 
     def get_loops(self, reactions=None, processes=None):
