@@ -2069,7 +2069,7 @@ class CommunityModel:
                                    use_loop_reactions_for_ko=use_loop_reactions_for_ko,
                                    processes=processes)
         rows = []
-        exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name)
+        exchg_metabolites = model.metabolites.query(lambda x: x.compartment == self.shared_compartment_name and not x.id == f"cpd11416_{self.shared_compartment_name}")
         member_names = self.get_member_names()
 
         columns = ["metabolite_id", "metabolite_name", "cross_feeding"]
