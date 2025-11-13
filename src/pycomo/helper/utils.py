@@ -729,7 +729,7 @@ def _find_loop_step(rxn_id, check_feasibility=False):
                     _status_queue.put({"verbosity": "warning", "pid": pid, "status": f"{pid}: Finished minimize {rxn_id} with status {solution.status}", "timestamp": time.time(), "target": rxn_id})
                 else:
                     logger.warning(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
-            min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+            min_flux = solution.objective_value if not solution.status == "infeasible" else float("nan")
 
         if _status_queue is not None:
             _status_queue.put({"verbosity": "status", "pid": pid, "status": f"Maximize {rxn_id}", "timestamp": time.time(), "target": rxn_id})
@@ -761,7 +761,7 @@ def _find_loop_step(rxn_id, check_feasibility=False):
                     _status_queue.put({"verbosity": "warning", "pid": pid, "status": f"{pid}: Finished maximize {rxn_id} with status {solution.status}", "timestamp": time.time(), "target": rxn_id})
                 else:
                     logger.warning(f"{pid}: Finished maximize {rxn_id} with status {solution.status}")
-            max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
+            max_flux = solution.objective_value if not solution.status == "infeasible" else float("nan")
 
         if _status_queue is not None:
             _status_queue.put({"verbosity": "status", "pid": pid, "status": f"Finished {rxn_id}", "timestamp": time.time(), "target": rxn_id})

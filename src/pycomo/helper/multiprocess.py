@@ -166,7 +166,7 @@ def _loopless_fva_step(rxn_id):
                     logger.debug(f"{rxn.id} Optimization for loopless flux finished")
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.debug(f"{rxn.id} min flux is infeasible")
+            logger.warning(f"{rxn.id} min flux is infeasible")
             min_flux = float("nan")
         solution = _model.optimize("maximize")
         logger.debug(f"{rxn.id} solver status on max is {solution.status}")
@@ -180,7 +180,7 @@ def _loopless_fva_step(rxn_id):
                     logger.debug(f"{rxn.id} Optimization for loopless flux finished")
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.debug(f"{rxn.id} max flux is infeasible")
+            logger.warning(f"{rxn.id} max flux is infeasible")
             max_flux = float("nan")
         logger.debug(f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
         return rxn_id, max_flux, min_flux
@@ -397,7 +397,7 @@ def _fva_step(rxn_id):
         if not solution.status == "infeasible":
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.debug(f"{rxn.id} min flux is infeasible")
+            logger.warning(f"{rxn.id} min flux is infeasible")
             min_flux = float("nan")
         logger.debug(f"Running maximize for rxn {rxn_id}")
         solution = _model.optimize("maximize")
@@ -406,7 +406,7 @@ def _fva_step(rxn_id):
         if not solution.status == "infeasible":
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.debug(f"{rxn.id} max flux is infeasible")
+            logger.warning(f"{rxn.id} max flux is infeasible")
             max_flux = float("nan")
         logger.debug(f"FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
         return rxn_id, max_flux, min_flux
