@@ -240,7 +240,8 @@ def loopless_fva(pycomo_model,
                  verbose=False,
                  processes=None,
                  time_out=30,
-                 max_time_out=300):
+                 max_time_out=300,
+                 restart_on_timeout=False):
     """
     Performs flux variability analysis and removes futile cycles from the solutions. This is
     achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
@@ -335,8 +336,6 @@ def loopless_fva(pycomo_model,
 
         try:
             if processes > 1:
-                chunk_size = len(reaction_ids) // processes
-                chunk_size = 1
                 time_out_step = min(100, int((max_time_out-time_out)/2.))
                 if time_out_step < 1: time_out_step = 1
                 failed_tasks = []
@@ -365,7 +364,10 @@ def loopless_fva(pycomo_model,
                         except _queue.Empty:
                             pass
                         try:
-                            res_tuple = res.get(timeout=time_out)
+                            if restart_on_timeout:
+                                res_tuple = res.get(timeout=time_out)
+                            else:
+                                res_tuple = res.get()
                             if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                                 logger.error(f"Worker error captured:\n{res_tuple}")
                                 raise ValueError(f"Worker error captured:\n{res_tuple}")
@@ -375,8 +377,6 @@ def loopless_fva(pycomo_model,
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                             result.at[rxn_id, "maximum"] = max_flux
                             result.at[rxn_id, "minimum"] = min_flux
-                            #for worker in pool._pool._pool:
-                                #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
                         except multiprocessing.TimeoutError:
                             logger.warning(f"FVA step timed out for rxn {input_rxn}")
                             failed_tasks.append(input_rxn)
@@ -505,7 +505,8 @@ def fva(pycomo_model,
         verbose=False,
         processes=None,
         time_out=30,
-        max_time_out=300):
+        max_time_out=300,
+        restart_on_timeout=False):
     """
     Performs flux variability analysis.
 
@@ -619,7 +620,10 @@ def fva(pycomo_model,
                         except _queue.Empty:
                             pass
                         try:
-                            res_tuple = res.get(timeout=time_out)
+                            if restart_on_timeout:
+                                res_tuple = res.get(timeout=time_out)
+                            else:
+                                res_tuple = res.get()
                             if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                                 logger.error(f"Worker error captured:\n{res_tuple}")
                                 raise ValueError(f"Worker error captured:\n{res_tuple}")

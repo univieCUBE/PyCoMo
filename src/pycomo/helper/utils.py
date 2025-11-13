@@ -788,11 +788,8 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
 
     try:
         if processes > 1:
-            chunk_size = len(reaction_ids) // processes
             time_out_step = min(100, int((max_time_out-time_out)/2.))
-            failed_tasks = []
-            #manager = multiprocessing.Manager()
-            #status_dict = manager.dict()
+            if time_out_step < 1: time_out_step = 1
             
             pool = SpawnProcessPool(
                 processes,
@@ -828,10 +825,7 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
                         pass
 
                     found_result = False
-                    # if len(statuses) == 0:
-                    #     logger.debug("No workers active - trying again")
-                    #     time.sleep(1)
-                    #     continue
+
                     for i, (input_rxn, res) in enumerate(pending):
                         try:
                             res_tuple = res.get(timeout=0.00001)  # Short timeout
@@ -848,9 +842,6 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
                             found_result = True
                             break  # Only process one result per loop
                         except multiprocessing.TimeoutError:
-                            # logger.debug(f"Timeout waiting for result of rxn {input_rxn}")
-                            # for pid, info in status_dict.items():
-                            #     logger.debug(f"Worker {pid}: {info}")
                             continue
                     if not found_result:
                         rounds_since_last_result += 1
@@ -895,50 +886,9 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
                                         raise exc
                                     
                         time.sleep(min(2*rounds_since_last_result, time_out))  # Wait before next check
-                # for input_rxn, res in zip(reaction_ids, async_results):
-                #     try:
-                #         res_tuple = res.get(timeout=time_out)
-                #         rxn_id, max_flux, min_flux = res_tuple
-                #         processed_rxns += 1
-                #         if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                #             logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                #         if min_flux != 0. or max_flux != 0.:
-                #             loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
-                #     except multiprocessing.TimeoutError:
-                #         logger.warning(f"Find loops step timed out for rxn {input_rxn}")
-                #         failed_tasks.append(input_rxn)
+
                 logger.info(f"While pending closed!")
-                if failed_tasks:
-                    time_out += time_out_step
-                    time_out = min(max_time_out, time_out)
-                    logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
-                    while failed_tasks and time_out <= max_time_out:
-                        repeat_failed_tasks = []
-                        async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in failed_tasks]
-                        for input_rxn, res in zip(failed_tasks, async_results):
-                            try:
-                                res_tuple = res.get(timeout=time_out)
-                                rxn_id, max_flux, min_flux = res_tuple
-                                processed_rxns += 1
-                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                                if min_flux != 0. or max_flux != 0.:
-                                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
-                            except multiprocessing.TimeoutError:
-                                logger.warning(f"FVA step timed out again for rxn {input_rxn}")
-                                repeat_failed_tasks.append(input_rxn)
-                        failed_tasks = repeat_failed_tasks
-                        time_out += time_out_step
-                    logger.error(f"Find loops failed for several reactions:\n{failed_tasks}")
-                    # Single core fallback
-                    _init_loop_worker(loop_model)
-                    logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
-                    for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
-                        processed_rxns += 1
-                        if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                        if min_flux != 0. or max_flux != 0.:
-                            loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+
             finally:
                 # ensure pool is cleaned up
                 try:
