@@ -192,7 +192,7 @@ def _loopless_fva_step(rxn_id):
 def loopless_fva(pycomo_model,
                  reactions,
                  fraction_of_optimum=None,
-                 use_loop_reactions_for_ko=True,
+                 use_loop_reactions_for_ko=False,
                  ko_candidate_ids=None,
                  verbose=False,
                  processes=None,

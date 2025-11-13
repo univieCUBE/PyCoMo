@@ -1789,7 +1789,7 @@ class CommunityModel:
     def loopless_fva(self,
                      reaction_ids,
                      fraction_of_optimum=None,
-                     use_loop_reactions_for_ko=True,
+                     use_loop_reactions_for_ko=False,
                      ko_candidate_ids=None,
                      verbose=False,
                      processes=None):
