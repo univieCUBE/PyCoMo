@@ -6,7 +6,7 @@ import warnings
 __description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
-__version__ = "0.2.8"
+from pycomo import __version__
 
 
 def parse_fva_flux(value):

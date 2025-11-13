@@ -8,6 +8,7 @@ flux vector tables."""
 # IMPORT SECTION
 from typing import List, Union
 from math import isnan
+import time
 
 import cobra
 import libsbml
@@ -18,6 +19,7 @@ from .helper.logger import *
 from .helper.utils import *
 from .helper.cli import *
 from .helper.multiprocess import *
+from pycomo import __version__
 
 logger = logging.getLogger(get_logger_name())
 
@@ -1108,6 +1110,25 @@ class CommunityModel:
                 break
 
         return member_name
+    
+    def write_model_description_notes(self):
+        """
+        Write a description of the generated community metabolic model. This includes the PyCoMo version, 
+        the number and names of the member organisms, and the date creation.
+
+        :return: A notes dictionary
+        """
+        notes = {}
+
+        notes["Description"] = f"This is a community metabolic model generated with PyCoMo v{__version__}, containing {len(self.get_member_names())} members."
+
+        notes["Commnuity members"] = ", ".join(self.get_member_names())
+
+        current_day = time.strftime("%d. %m. %Y")
+
+        notes["Model generation date"] = current_day
+
+        return notes
 
     def generate_community_model(self):
         """
@@ -1124,9 +1145,13 @@ class CommunityModel:
         """
         merged_model = None
         biomass_mets = {}
+        notes = self.write_model_description_notes()
+        annotation = {}
         idx = 0
         for model in self.member_models:
             idx += 1
+            model_notes = model.model.notes.copy()
+            notes[f"Notes of {model.name}"] = model_notes
             if idx == 1:
                 merged_model = model.prepare_for_merging(shared_compartment_name=self.shared_compartment_name,
                                                          max_flux=self.max_flux)
@@ -1179,6 +1204,8 @@ class CommunityModel:
         self.fixed_abundance_flag = False
         self.merge_fraction_reactions(merged_model)
         self._add_fixed_abundance_reaction(merged_model)
+        merged_model.notes = notes
+        merged_model.annotation = annotation
 
         biomass_met = cobra.Metabolite(f"cpd11416_{self.shared_compartment_name}", name='Community Biomass',
                                        compartment=self.shared_compartment_name)
