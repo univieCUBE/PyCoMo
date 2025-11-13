@@ -823,18 +823,19 @@ class CommunityModel:
     @property
     def transport_reactions(self):
         """
-        A list of f_reactions (dummy reactions controlling the reaction bounds)
+        A list of transport reactions (reactions with metabolites in two or more compartments, but not the shared medium compartment)
 
-        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        :return: A list of transport reactions
         """
         return self._transfer_reactions
 
     @transport_reactions.getter
     def transport_reactions(self):
         """
-        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+        Getter function for the list of transport reactions (reactions with metabolites in two or more compartments, 
+        but not the shared medium compartment)
 
-        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        :return: A list of transport reactions
         """
         self._transport_reactions = self.model.reactions.query(
             lambda x: self.is_transporter(x))
@@ -845,29 +846,34 @@ class CommunityModel:
     @property
     def transfer_reactions(self):
         """
-        A list of f_reactions (dummy reactions controlling the reaction bounds)
+        A list of transfer reactions (reactions connecting the shared medium compartment to the external compartments of each member)
 
-        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        :return: A list of transfer reactions
         """
         return self._transfer_reactions
 
     @transfer_reactions.getter
     def transfer_reactions(self):
         """
-        Getter function for the list of f_reactions (dummy reactions controlling the reaction bounds)
+        Getter function for the list of transfer reactions (reactions connecting the shared medium compartment to the external 
+        compartments of each member)
 
-        :return: A list of f_reactions (dummy reactions controlling the reaction bounds)
+        :return: A list of transfer reactions
         """
-        f_reactions = self.f_reactions
-        transport_rxns = self.transport_reactions
-        self._transfer_reactions = self.model.reactions.query(
-            lambda x: x not in f_reactions
-                      and x not in transport_rxns
-                      and len(x.compartments) == 3
-                      and "fraction_reaction" in x.compartments
-                      and self.shared_compartment_name in x.compartments)
-        if self._transfer_reactions is None:
-            self._transfer_reactions = []
+        m_mets = set(self.model.metabolites.query(lambda x: x.compartment == "medium"))
+        f_mets = set(self.model.metabolites.query(lambda x: x.compartment == "fraction_reaction"))
+        biomass_met = self.model.metabolites.get_by_id(f"cpd11416_{self.shared_compartment_name}")
+        tf_reactions = []
+        for rxn in self.model.reactions:
+            rxn_mets = set(rxn.metabolites)
+            if len(rxn_mets.intersection(m_mets)) == 0:
+                continue
+            if len(rxn_mets.intersection(f_mets)) == 0:
+                continue
+            if biomass_met in rxn_mets:
+                continue
+            tf_reactions.append(rxn)
+        self._transfer_reactions = tf_reactions
         return self._transfer_reactions
 
     @property
@@ -1846,8 +1852,10 @@ class CommunityModel:
 
         if only_exchange_reactions:
             log_call("Setting reactions to be analysed to exchange reactions only")
+            biomass_met = model.metabolites.get_by_id(f"cpd11416_{self.shared_compartment_name}")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
-                                                             for met in x.metabolites.keys()]))
+                                                             for met in x.metabolites.keys()]) and biomass_met not in x.metabolites.keys())
+            print(reactions)
         elif reactions is None:
             log_call("Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
