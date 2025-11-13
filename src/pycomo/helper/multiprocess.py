@@ -7,6 +7,9 @@ import pandas as pd
 import multiprocessing
 from optlang.symbolics import Zero
 import traceback
+import os
+import queue as _queue  # for Queue.Empty when draining status queue
+
 
 import time
 from .utils import get_f_reactions, find_incoherent_bounds
@@ -25,7 +28,7 @@ logger.info('Multiprocess Logger initialized.')
 configuration = Configuration()
 
 
-def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf=None) -> None:
+def _init_fva_worker(model: "Model", ko_candidate_ids: list, status_queue=None, logger_conf=None) -> None:
     """
     Initialize a global model object and corresponding variables for multiprocessing.
 
@@ -37,15 +40,44 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, logger_conf=None) -
     global _f_rxn_set
     global _exchg_rxn_set
     global _ll_candidates
+    global _status_queue
     global logger
+    pid = os.getpid()
     _model = model
+    _status_queue = status_queue
     _f_rxn_set = set(get_f_reactions(_model))
     _exchg_rxn_set = set(_model.exchanges)
     _ll_candidates = set(_model.reactions.get_by_any(ko_candidate_ids))
-    if logger_conf is not None:
-        configure_logger(logger_conf[1], logger_conf[2], with_name=logger_conf[0])
-        logger = get_logger(logger_conf[0])
+    # if logger_conf is not None:
+    #     configure_logger(logger_conf[1], logger_conf[2], with_name=logger_conf[0])
+    #     logger = get_logger(logger_conf[0])
+    if _status_queue is not None:
+        _status_queue.put({"verbosity": "debug",
+                          "pid": pid,
+                          "status": f"Worker {pid} initialized.", 
+                          "timestamp": time.time(), 
+                          "target": None})
     logger.debug(f"_init_worker finished in {time.time() - s_time}")
+
+
+def log_call_by_verbosity(verbosity):
+    if verbosity.lower() == "info":
+        return logger.info
+    if verbosity.lower() == "warning":
+        return logger.warning
+    if verbosity.lower() == "error":
+        return logger.error
+    if verbosity.lower() == "debug":
+        return logger.debug
+    return logger.debug
+
+
+def log_or_queue_message(verbosity, status, target=None):
+    pid = os.getpid()
+    if _status_queue is not None:
+        _status_queue.put({"verbosity": verbosity, "pid": pid, "status": status, "timestamp": time.time(), "target": target})
+    else:
+        log_call_by_verbosity(verbosity)(status)
 
 
 def _add_loopless_constraints_and_objective(fluxes):
@@ -57,7 +89,7 @@ def _add_loopless_constraints_and_objective(fluxes):
 
     :param fluxes: flux vector of the solution where loops should be removed
     """
-    logger.debug("Starting add loopless constraints")
+    log_or_queue_message(verbosity="debug", status="Starting add loopless constraints", target=None)
 
     _model.objective = _model.solver.interface.Objective(
         Zero, direction="min", sloppy=True
@@ -66,7 +98,7 @@ def _add_loopless_constraints_and_objective(fluxes):
     objective_vars = []
 
     # Fix exchange reactions
-    logger.debug("Add exchange constraints")
+    log_or_queue_message(verbosity="debug", status="Add exchange constraints", target=None)
 
     ko_cand_rxn_set = _ll_candidates
 
@@ -76,7 +108,7 @@ def _add_loopless_constraints_and_objective(fluxes):
         rxn.bounds = (flux, flux)
 
     # Fix ko_candidate reactions
-    logger.debug("Add ko_candidate constraints")
+    log_or_queue_message(verbosity="debug", status="Add ko_candidate constraints", target=None)
     ko_candidate_rxns = ko_cand_rxn_set - _f_rxn_set - _exchg_rxn_set
     for rxn in ko_candidate_rxns:
         flux = fluxes[rxn.id]
@@ -85,7 +117,9 @@ def _add_loopless_constraints_and_objective(fluxes):
             upper_bound = min(flux, rxn.upper_bound)
             if not (upper_bound >= lower_bound):
                 # flux is lower than rxn.lower_bound due to numerical problems
-                logger.warning(f"Flux of reaction {rxn.id} is lower than lower bound: {flux} < {lower_bound}")
+                log_or_queue_message(verbosity="warning", 
+                                     status=f"Flux of reaction {rxn.id} is lower than lower bound: {flux} < {lower_bound}", 
+                                     target=None)
                 upper_bound = lower_bound
             rxn.bounds = lower_bound, upper_bound
             objective_vars.append(rxn.forward_variable)
@@ -94,7 +128,10 @@ def _add_loopless_constraints_and_objective(fluxes):
             upper_bound = min(0., rxn.upper_bound)
             if not (upper_bound >= lower_bound):
                 # flux is higher than rxn.upper_bound due to numerical problems
-                logger.warning(f"Flux of reaction {rxn.id} is higher than upper bound: {flux} > {upper_bound}")
+                log_or_queue_message(
+                    verbosity="warning", 
+                    status=f"Flux of reaction {rxn.id} is higher than upper bound: {flux} > {upper_bound}", 
+                    target=None)
                 upper_bound = lower_bound
             rxn.bounds = lower_bound, upper_bound
             objective_vars.append(rxn.reverse_variable)
@@ -102,7 +139,7 @@ def _add_loopless_constraints_and_objective(fluxes):
             rxn.bounds = 0, 0
 
     # Fix remaining reactions
-    logger.debug("Add remaining constraints")
+    log_or_queue_message(verbosity="debug", status="Add remaining constraints", target=None)
     remaining_rxns = set(_model.reactions) - ko_cand_rxn_set - _f_rxn_set - _exchg_rxn_set
     for rxn in remaining_rxns:
         flux = fluxes[rxn.id]
@@ -111,7 +148,10 @@ def _add_loopless_constraints_and_objective(fluxes):
             upper_bound = min(flux, rxn.upper_bound)
             if not (upper_bound >= lower_bound):
                 # flux is lower than rxn.lower_bound due to numerical problems
-                logger.warning(f"Flux of reaction {rxn.id} is lower than lower bound: {flux} < {lower_bound}")
+                log_or_queue_message(
+                    verbosity="warning", 
+                    status=f"Flux of reaction {rxn.id} is lower than lower bound: {flux} < {lower_bound}", 
+                    target=None)
                 upper_bound = lower_bound
             rxn.bounds = lower_bound, upper_bound
         elif flux < 0:
@@ -119,15 +159,18 @@ def _add_loopless_constraints_and_objective(fluxes):
             upper_bound = min(0., rxn.upper_bound)
             if not (upper_bound >= lower_bound):
                 # flux is higher than rxn.upper_bound due to numerical problems
-                logger.warning(f"Flux of reaction {rxn.id} is higher than upper bound: {flux} > {upper_bound}")
+                log_or_queue_message(
+                    verbosity="warning", 
+                    status=f"Flux of reaction {rxn.id} is higher than upper bound: {flux} > {upper_bound}", 
+                    target=None)
                 upper_bound = lower_bound
             rxn.bounds = lower_bound, upper_bound
         else:
             rxn.bounds = 0, 0
 
-    logger.debug("Set coefficients")
+    log_or_queue_message(verbosity="debug", status="add loopless constraints finished", target=None)
     _model.objective.set_linear_coefficients({v: 1.0 for v in objective_vars})
-    logger.debug("add loopless constraints finished")
+    log_or_queue_message(verbosity="debug", status="add loopless constraints finished", target=None)
     return
 
 
@@ -141,7 +184,8 @@ def _loopless_fva_step(rxn_id):
     :return rxn_id, max_flux, min_flux: The input reaction ID, maximum flux and minimum flux (as calculated by loopless
     FVA)
     """
-    logger.debug(f"Starting loopless FVA step for rxn {rxn_id}")
+    log_or_queue_message(verbosity="debug", status=f"Starting loopless FVA step for rxn {rxn_id}", target=rxn_id)
+
     try:
         rxn = _model.reactions.get_by_id(rxn_id)
         perform_loopless_on_rxn = True
@@ -151,41 +195,43 @@ def _loopless_fva_step(rxn_id):
             perform_loopless_on_rxn = False
 
         if perform_loopless_on_rxn:
-            logger.info(f"Loop correction will be applied on {rxn.id}")
+            log_or_queue_message(verbosity="info", status=f"Loop correction will be applied on {rxn.id}", target=rxn_id)
+
 
         _model.objective = rxn.id
         solution = _model.optimize("minimize")
-        logger.debug(f"{rxn.id} solver status on min is {solution.status}")
+        log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on min is {solution.status}", target=rxn_id)
+
         if not solution.status == "infeasible":
             if perform_loopless_on_rxn:
-                logger.debug(f"{rxn.id} Starting loop correction")
+                log_or_queue_message(verbosity="debug", status=f"{rxn.id} Starting loop correction", target=rxn_id)
                 with _model:
                     _add_loopless_constraints_and_objective(solution.fluxes)
-                    logger.debug(f"{rxn.id} Optimize for loopless flux")
+                    log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimize for loopless flux", target=rxn_id)
                     solution = _model.optimize()
-                    logger.debug(f"{rxn.id} Optimization for loopless flux finished")
+                    log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimization for loopless flux finished", target=rxn_id)
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.warning(f"{rxn.id} min flux is infeasible")
+            log_or_queue_message(verbosity="warning", status=f"{rxn.id} min flux is infeasible", target=rxn_id)
             min_flux = float("nan")
         solution = _model.optimize("maximize")
-        logger.debug(f"{rxn.id} solver status on max is {solution.status}")
+        log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on max is {solution.status}", target=rxn_id)
         if not solution.status == "infeasible":
             if perform_loopless_on_rxn:
-                logger.debug(f"{rxn.id} Starting loop correction")
+                log_or_queue_message(verbosity="debug", status=f"{rxn.id} Starting loop correction", target=rxn_id)
                 with _model:
                     _add_loopless_constraints_and_objective(solution.fluxes)
-                    logger.debug(f"{rxn.id} Optimize for loopless flux")
+                    log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimize for loopless flux", target=rxn_id)
                     solution = _model.optimize()
-                    logger.debug(f"{rxn.id} Optimization for loopless flux finished")
+                    log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimization for loopless flux finished", target=rxn_id)
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.warning(f"{rxn.id} max flux is infeasible")
+            log_or_queue_message(verbosity="warning", status=f"{rxn.id} max flux is infeasible", target=rxn_id)
             max_flux = float("nan")
-        logger.debug(f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
+        log_or_queue_message(verbosity="debug", status=f"loopless FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}", target=rxn_id)
         return rxn_id, max_flux, min_flux
     except Exception as e:
-        logger.error(f"Error thrown in FVA step {rxn_id}")
+        log_or_queue_message(verbosity="debug", status=f"Error thrown in FVA step {rxn_id}", target=rxn_id)
         return f"Error: {e}\n{traceback.format_exc()}"
 
 
@@ -286,71 +332,43 @@ def loopless_fva(pycomo_model,
 
         processed_rxns = 0
 
-        if processes > 1:
-            chunk_size = len(reaction_ids) // processes
-            chunk_size = 1
-            time_out_step = min(100, int((max_time_out-time_out)/2.))
-            if time_out_step < 1: time_out_step = 1
-            failed_tasks = []
-            with SpawnProcessPool(
-                    processes,
-                    initializer=_init_fva_worker,
-                    initargs=(pycomo_model.model, ko_candidate_ids, get_logger_conf()),
-            ) as pool:
-                async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in reaction_ids]
-                for input_rxn, res in zip(reaction_ids, async_results):
-                    try:
-                        res_tuple = res.get(timeout=time_out)
-                        if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
-                            logger.error(f"Worker error captured:\n{res_tuple}")
-                            raise ValueError(f"Worker error captured:\n{res_tuple}")
-                        rxn_id, max_flux, min_flux = res_tuple
-                        processed_rxns += 1
-                        if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                        result.at[rxn_id, "maximum"] = max_flux
-                        result.at[rxn_id, "minimum"] = min_flux
-                        #for worker in pool._pool._pool:
-                            #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
-                    except multiprocessing.TimeoutError:
-                        logger.warning(f"FVA step timed out for rxn {input_rxn}")
-                        failed_tasks.append(input_rxn)
-                if failed_tasks:
-                    for worker in pool._pool._pool:
-                        if not worker.is_alive():
-                            logger.warning(f"Worker {worker.pid} is dead: {not worker.is_alive()}")
-                        logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
-                    time_out += time_out_step
-                    time_out = min(max_time_out, time_out)
-                    logger.info(f"Repeating failed FVA steps for reactions: {failed_tasks}")
-                    while failed_tasks and time_out <= max_time_out:
-                        logger.debug(f"Repeat FVA steps with timeout = {time_out}: {failed_tasks}")
-                        repeat_failed_tasks = []
-                        async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in failed_tasks]
-                        for input_rxn, res in zip(failed_tasks, async_results):
-                            try:
-                                res_tuple = res.get(timeout=time_out)
-                                rxn_id, max_flux, min_flux = res_tuple
-                                processed_rxns += 1
-                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                                result.at[rxn_id, "maximum"] = max_flux
-                                result.at[rxn_id, "minimum"] = min_flux
-                            except multiprocessing.TimeoutError:
-                                logger.warning(f"FVA step timed out again for rxn {input_rxn}")
-                                repeat_failed_tasks.append(input_rxn)
-                        for worker in pool._pool._pool:
-                            if not worker.is_alive():
-                                logger.warning(f"Worker {worker.pid} is dead: {not worker.is_alive()}")
-                            logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
-                        failed_tasks = repeat_failed_tasks
-                        time_out += time_out_step
-                    if failed_tasks:
-                        logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
-                        # Single core fallback
-                        logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
-                        _init_fva_worker(pycomo_model.model, ko_candidate_ids)
-                        for res_tuple in map(_loopless_fva_step, failed_tasks):
+        ctx = multiprocessing.get_context("spawn")
+        manager = ctx.Manager()
+        status_queue = manager.Queue()  
+
+        try:
+            if processes > 1:
+                chunk_size = len(reaction_ids) // processes
+                chunk_size = 1
+                time_out_step = min(100, int((max_time_out-time_out)/2.))
+                if time_out_step < 1: time_out_step = 1
+                failed_tasks = []
+                with SpawnProcessPool(
+                        processes,
+                        initializer=_init_fva_worker,
+                        initargs=(pycomo_model.model, ko_candidate_ids, status_queue, get_logger_conf()),
+                ) as pool:
+                    statuses = {}
+                    async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in reaction_ids]
+                    for input_rxn, res in zip(reaction_ids, async_results):
+                        # drain status_queue (non-blocking) to update local statuses immediately
+                        try:
+                            while True:
+                                msg = status_queue.get_nowait()
+                                statuses[msg["pid"]] = msg
+                                if msg["verbosity"] in ["info", "debug", "warning", "error"]:
+                                    if msg["verbosity"] == "debug":
+                                        logger.debug(f"worker {msg['pid']}: {msg['status']}")
+                                    if msg["verbosity"] == "info":
+                                        logger.info(f"worker {msg['pid']}: {msg['status']}")
+                                    if msg["verbosity"] == "warning":
+                                        logger.warning(f"worker {msg['pid']}: {msg['status']}")
+                                    if msg["verbosity"] == "error":
+                                        logger.error(f"worker {msg['pid']}: {msg['status']}")
+                        except _queue.Empty:
+                            pass
+                        try:
+                            res_tuple = res.get(timeout=time_out)
                             if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                                 logger.error(f"Worker error captured:\n{res_tuple}")
                                 raise ValueError(f"Worker error captured:\n{res_tuple}")
@@ -360,18 +378,87 @@ def loopless_fva(pycomo_model,
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                             result.at[rxn_id, "maximum"] = max_flux
                             result.at[rxn_id, "minimum"] = min_flux
-        else:
-            _init_fva_worker(pycomo_model.model, ko_candidate_ids)
-            for res_tuple in map(_loopless_fva_step, reaction_ids):
-                if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
-                    logger.error(f"Worker error captured:\n{res_tuple}")
-                    raise ValueError(f"Worker error captured:\n{res_tuple}")
-                rxn_id, max_flux, min_flux = res_tuple
-                processed_rxns += 1
-                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                result.at[rxn_id, "maximum"] = max_flux
-                result.at[rxn_id, "minimum"] = min_flux
+                            #for worker in pool._pool._pool:
+                                #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                        except multiprocessing.TimeoutError:
+                            logger.warning(f"FVA step timed out for rxn {input_rxn}")
+                            failed_tasks.append(input_rxn)
+                    if failed_tasks:
+                        for worker in pool._pool._pool:
+                            if not worker.is_alive():
+                                logger.warning(f"Worker {worker.pid} is dead: {not worker.is_alive()}")
+                            logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                        time_out += time_out_step
+                        time_out = min(max_time_out, time_out)
+                        logger.info(f"Repeating failed FVA steps for reactions: {failed_tasks}")
+                        while failed_tasks and time_out <= max_time_out:
+                            logger.debug(f"Repeat FVA steps with timeout = {time_out}: {failed_tasks}")
+                            repeat_failed_tasks = []
+                            async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in failed_tasks]
+                            for input_rxn, res in zip(failed_tasks, async_results):
+                                try:
+                                    res_tuple = res.get(timeout=time_out)
+                                    rxn_id, max_flux, min_flux = res_tuple
+                                    processed_rxns += 1
+                                    if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                                    result.at[rxn_id, "maximum"] = max_flux
+                                    result.at[rxn_id, "minimum"] = min_flux
+                                except multiprocessing.TimeoutError:
+                                    logger.warning(f"FVA step timed out again for rxn {input_rxn}")
+                                    repeat_failed_tasks.append(input_rxn)
+                            for worker in pool._pool._pool:
+                                if not worker.is_alive():
+                                    logger.warning(f"Worker {worker.pid} is dead: {not worker.is_alive()}")
+                                logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                            failed_tasks = repeat_failed_tasks
+                            time_out += time_out_step
+                        if failed_tasks:
+                            logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
+                            # Single core fallback
+                            logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                            _init_fva_worker(pycomo_model.model, ko_candidate_ids)
+                            for res_tuple in map(_loopless_fva_step, failed_tasks):
+                                if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                                    logger.error(f"Worker error captured:\n{res_tuple}")
+                                    raise ValueError(f"Worker error captured:\n{res_tuple}")
+                                rxn_id, max_flux, min_flux = res_tuple
+                                processed_rxns += 1
+                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                                result.at[rxn_id, "maximum"] = max_flux
+                                result.at[rxn_id, "minimum"] = min_flux
+            else:
+                _init_fva_worker(pycomo_model.model, ko_candidate_ids)
+                for res_tuple in map(_loopless_fva_step, reaction_ids):
+                    if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                        logger.error(f"Worker error captured:\n{res_tuple}")
+                        raise ValueError(f"Worker error captured:\n{res_tuple}")
+                    rxn_id, max_flux, min_flux = res_tuple
+                    processed_rxns += 1
+                    if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                    result.at[rxn_id, "maximum"] = max_flux
+                    result.at[rxn_id, "minimum"] = min_flux
+        finally:
+            try:
+                for p in multiprocessing.active_children():
+                    try:
+                        p.terminate()
+                        p.join(timeout=0.1)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Stopping active child processes raised an exception: {e}")
+
+
+            logger.debug(f"Shutting down queue manager")
+            try:
+                # Manager.shutdown() will stop the manager process and its queues
+                manager.shutdown()
+            except Exception as e:
+                #logger.warning(f"Manager raised exception during shutdown: {e}")
+                pass
 
     return result
 
@@ -385,33 +472,33 @@ def _fva_step(rxn_id):
     :return rxn_id, max_flux, min_flux: The input reaction ID, maximum flux and minimum flux (as calculated by loopless
     FVA)
     """
-    logger.debug(f"Starting FVA step for rxn {rxn_id}")
+    log_or_queue_message(verbosity="debug", status=f"Starting FVA step for rxn {rxn_id}", target=rxn_id)
     try:
         rxn = _model.reactions.get_by_id(rxn_id)
 
         _model.objective = rxn.id
-        logger.debug(f"Running minimize for rxn {rxn_id}")
+        log_or_queue_message(verbosity="debug", status=f"Running minimize for rxn {rxn_id}", target=rxn_id)
         solution = _model.optimize("minimize")
-        logger.debug(f"Running minimize finished for rxn {rxn_id}")
-        logger.debug(f"{rxn.id} solver status on min is {solution.status}")
+        log_or_queue_message(verbosity="debug", status=f"Running minimize finished for rxn {rxn_id}", target=rxn_id)
+        log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on min is {solution.status}", target=rxn_id)
         if not solution.status == "infeasible":
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.warning(f"{rxn.id} min flux is infeasible")
+            log_or_queue_message(verbosity="warning", status=f"{rxn.id} min flux is infeasible", target=rxn_id)
             min_flux = float("nan")
-        logger.debug(f"Running maximize for rxn {rxn_id}")
+        log_or_queue_message(verbosity="debug", status=f"Running maximize for rxn {rxn_id}", target=rxn_id)
         solution = _model.optimize("maximize")
-        logger.debug(f"Running maximize finished for rxn {rxn_id}")
-        logger.debug(f"{rxn.id} solver status on max is {solution.status}")
+        log_or_queue_message(verbosity="debug", status=f"Running maximize finished for rxn {rxn_id}", target=rxn_id)
+        log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on max is {solution.status}", target=rxn_id)
         if not solution.status == "infeasible":
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
-            logger.warning(f"{rxn.id} max flux is infeasible")
+            log_or_queue_message(verbosity="warning", status=f"{rxn.id} max flux is infeasible", target=rxn_id)
             max_flux = float("nan")
-        logger.debug(f"FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}")
+        log_or_queue_message(verbosity="debug", status=f"FVA step for rxn {rxn_id} finished with min/max flux {min_flux}/{max_flux}", target=rxn_id)
         return rxn_id, max_flux, min_flux
     except Exception as e:
-        logger.error(f"Error thrown in FVA step {rxn_id}")
+        log_or_queue_message(verbosity="error", status=f"Error thrown in FVA step {rxn_id}", target=rxn_id)
         return f"Error: {e}\n{traceback.format_exc()}"
     
 
@@ -500,66 +587,42 @@ def fva(pycomo_model,
 
         processed_rxns = 0
 
-        if processes > 1:
-            chunk_size = len(reaction_ids) // processes
-            chunk_size = 1
-            time_out_step = min(100, int((max_time_out-time_out)/2.))
-            if time_out_step < 1: time_out_step = 1
-            failed_tasks = []
-            with SpawnProcessPool(
-                    processes,
-                    initializer=_init_fva_worker,
-                    initargs=(pycomo_model.model, [], get_logger_conf()),
-            ) as pool:
-                async_results = [pool.apply_async(_fva_step, args=(r,)) for r in reaction_ids]
-                for input_rxn, res in zip(reaction_ids, async_results):
-                    try:
-                        res_tuple = res.get(timeout=time_out)
-                        if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
-                            logger.error(f"Worker error captured:\n{res_tuple}")
-                            raise ValueError(f"Worker error captured:\n{res_tuple}")
-                        rxn_id, max_flux, min_flux = res_tuple
-                        processed_rxns += 1
-                        if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                            logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                        result.at[rxn_id, "maximum"] = max_flux
-                        result.at[rxn_id, "minimum"] = min_flux
-                        #for worker in pool._pool._pool:
-                            #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
-                    except multiprocessing.TimeoutError:
-                        logger.warning(f"FVA step timed out for rxn {input_rxn}")
-                        failed_tasks.append(input_rxn)
-                if failed_tasks:
-                    for worker in pool._pool._pool:
-                        if not worker.is_alive():
-                            logger.warning(f"Worker {worker.pid} is dead: {not worker.is_alive()}")
-                        logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
-                    time_out += time_out_step
-                    time_out = min(max_time_out, time_out)
-                    logger.info(f"Repeating failed FVA steps for reactions: {failed_tasks}")
-                    while failed_tasks and time_out <= max_time_out:
-                        repeat_failed_tasks = []
-                        async_results = [pool.apply_async(_fva_step, args=(r,)) for r in failed_tasks]
-                        for input_rxn, res in zip(failed_tasks, async_results):
-                            try:
-                                res_tuple = res.get(timeout=time_out)
-                                rxn_id, max_flux, min_flux = res_tuple
-                                processed_rxns += 1
-                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                                result.at[rxn_id, "maximum"] = max_flux
-                                result.at[rxn_id, "minimum"] = min_flux
-                            except multiprocessing.TimeoutError:
-                                logger.warning(f"FVA step timed out again for rxn {input_rxn}")
-                                repeat_failed_tasks.append(input_rxn)
-                        failed_tasks = repeat_failed_tasks
-                        time_out += time_out_step
-                    if failed_tasks:
-                        logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
-                        # Single core fallback
-                        logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
-                        _init_fva_worker(pycomo_model.model, [])
-                        for res_tuple in map(_fva_step, failed_tasks):
+        ctx = multiprocessing.get_context("spawn")
+        manager = ctx.Manager()
+        status_queue = manager.Queue()  
+
+        try:
+            if processes > 1:
+                chunk_size = len(reaction_ids) // processes
+                chunk_size = 1
+                time_out_step = min(100, int((max_time_out-time_out)/2.))
+                if time_out_step < 1: time_out_step = 1
+                failed_tasks = []
+                with SpawnProcessPool(
+                        processes,
+                        initializer=_init_fva_worker,
+                        initargs=(pycomo_model.model, [], status_queue, get_logger_conf()),
+                ) as pool:
+                    statuses = {}
+                    async_results = [pool.apply_async(_fva_step, args=(r,)) for r in reaction_ids]
+                    for input_rxn, res in zip(reaction_ids, async_results):
+                        try:
+                            while True:
+                                msg = status_queue.get_nowait()
+                                statuses[msg["pid"]] = msg
+                                if msg["verbosity"] in ["info", "debug", "warning", "error"]:
+                                    if msg["verbosity"] == "debug":
+                                        logger.debug(f"worker {msg['pid']}: {msg['status']}")
+                                    if msg["verbosity"] == "info":
+                                        logger.info(f"worker {msg['pid']}: {msg['status']}")
+                                    if msg["verbosity"] == "warning":
+                                        logger.warning(f"worker {msg['pid']}: {msg['status']}")
+                                    if msg["verbosity"] == "error":
+                                        logger.error(f"worker {msg['pid']}: {msg['status']}")
+                        except _queue.Empty:
+                            pass
+                        try:
+                            res_tuple = res.get(timeout=time_out)
                             if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
                                 logger.error(f"Worker error captured:\n{res_tuple}")
                                 raise ValueError(f"Worker error captured:\n{res_tuple}")
@@ -569,17 +632,82 @@ def fva(pycomo_model,
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
                             result.at[rxn_id, "maximum"] = max_flux
                             result.at[rxn_id, "minimum"] = min_flux
-        else:
-            _init_fva_worker(pycomo_model.model, [])
-            for res_tuple in map(_fva_step, reaction_ids):
-                if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
-                    logger.error(f"Worker error captured:\n{res_tuple}")
-                    raise ValueError(f"Worker error captured:\n{res_tuple}")
-                rxn_id, max_flux, min_flux = res_tuple
-                processed_rxns += 1
-                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
-                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
-                result.at[rxn_id, "maximum"] = max_flux
-                result.at[rxn_id, "minimum"] = min_flux
+                            #for worker in pool._pool._pool:
+                                #logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                        except multiprocessing.TimeoutError:
+                            logger.warning(f"FVA step timed out for rxn {input_rxn}")
+                            failed_tasks.append(input_rxn)
+                    if failed_tasks:
+                        for worker in pool._pool._pool:
+                            if not worker.is_alive():
+                                logger.warning(f"Worker {worker.pid} is dead: {not worker.is_alive()}")
+                            logger.debug(f"Worker {worker.pid} is alive: {worker.is_alive()}")
+                        time_out += time_out_step
+                        time_out = min(max_time_out, time_out)
+                        logger.info(f"Repeating failed FVA steps for reactions: {failed_tasks}")
+                        while failed_tasks and time_out <= max_time_out:
+                            repeat_failed_tasks = []
+                            async_results = [pool.apply_async(_fva_step, args=(r,)) for r in failed_tasks]
+                            for input_rxn, res in zip(failed_tasks, async_results):
+                                try:
+                                    res_tuple = res.get(timeout=time_out)
+                                    rxn_id, max_flux, min_flux = res_tuple
+                                    processed_rxns += 1
+                                    if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                                    result.at[rxn_id, "maximum"] = max_flux
+                                    result.at[rxn_id, "minimum"] = min_flux
+                                except multiprocessing.TimeoutError:
+                                    logger.warning(f"FVA step timed out again for rxn {input_rxn}")
+                                    repeat_failed_tasks.append(input_rxn)
+                            failed_tasks = repeat_failed_tasks
+                            time_out += time_out_step
+                        if failed_tasks:
+                            logger.error(f"FVA failed for several reactions:\n{failed_tasks}")
+                            # Single core fallback
+                            logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
+                            _init_fva_worker(pycomo_model.model, [])
+                            for res_tuple in map(_fva_step, failed_tasks):
+                                if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                                    logger.error(f"Worker error captured:\n{res_tuple}")
+                                    raise ValueError(f"Worker error captured:\n{res_tuple}")
+                                rxn_id, max_flux, min_flux = res_tuple
+                                processed_rxns += 1
+                                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                                result.at[rxn_id, "maximum"] = max_flux
+                                result.at[rxn_id, "minimum"] = min_flux
+            else:
+                _init_fva_worker(pycomo_model.model, [])
+                for res_tuple in map(_fva_step, reaction_ids):
+                    if isinstance(res_tuple, str) and res_tuple.startswith("Error:"):  # Identify error messages
+                        logger.error(f"Worker error captured:\n{res_tuple}")
+                        raise ValueError(f"Worker error captured:\n{res_tuple}")
+                    rxn_id, max_flux, min_flux = res_tuple
+                    processed_rxns += 1
+                    if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of fva steps")
+                    result.at[rxn_id, "maximum"] = max_flux
+                    result.at[rxn_id, "minimum"] = min_flux
+        finally:
+            try:
+                for p in multiprocessing.active_children():
+                    try:
+                        p.terminate()
+                        p.join(timeout=0.1)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Stopping active child processes raised an exception: {e}")
+
+
+            logger.debug(f"Shutting down queue manager")
+            try:
+                # Manager.shutdown() will stop the manager process and its queues
+                manager.shutdown()
+            except Exception as e:
+                #logger.warning(f"Manager raised exception during shutdown: {e}")
+                pass
+
 
     return result
