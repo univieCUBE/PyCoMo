@@ -643,14 +643,13 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def _init_loop_worker(model, status_queue=None, logger_conf=None):
+def _init_loop_worker(model, status_queue=None):
     """
     Initialize a global model object for multiprocessing and attach a QueueHandler
     so that worker logging goes into the provided multiprocessing queue.
 
     :param model: The model to perform find loops in
     :param log_queue: multiprocessing.Queue used to transport LogRecords to main process
-    :param logger_conf: fallback logger configuration if no queue is provided
     """
 
     global _model
@@ -659,25 +658,7 @@ def _init_loop_worker(model, status_queue=None, logger_conf=None):
     _model = model
     _status_queue = status_queue
     pid = os.getpid()
-    # If a log queue is provided, replace handlers with a QueueHandler so that
-    # all logging is forwarded to the main process via the queue.
-    # if log_queue is not None:
-    #     qh = QueueHandler(log_queue)
-    #     root = logging.getLogger()
-    #     # Remove any existing handlers in worker and attach the queue handler
-    #     for h in list(root.handlers):
-    #         root.removeHandler(h)
-    #     root.addHandler(qh)
-    #     root.setLevel(logging.DEBUG)
-    # else:
-    if logger_conf is not None:
-        # logging.basicConfig(
-        #     #filename=f'pycomo_worker_{pid}.log',
-        #     level=logging.INFO,
-        #     format='%(asctime)s %(process)d %(levelname)s %(message)s'
-        # )
-        configure_logger(logger_conf[1], logger_conf[2], with_name=logger_conf[0])
-        logger = get_logger(logger_conf[0])
+
     if _status_queue is not None:
         _status_queue.put({"verbosity": "debug",
                           "pid": pid,
@@ -816,7 +797,7 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
             pool = SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
-                initargs=(tuple([loop_model, status_queue, get_logger_conf()])),
+                initargs=(tuple([loop_model, status_queue])),
             )
             try:
                 async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
@@ -898,7 +879,7 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
                                         pool = SpawnProcessPool(
                                             processes,
                                             initializer=_init_loop_worker,
-                                            initargs=(tuple([loop_model, status_queue, get_logger_conf()])),
+                                            initargs=(tuple([loop_model, status_queue])),
                                         )
                                         async_results = [pool.apply_async(_find_loop_step, args=(rxn,)) for rxn, _ in pending]
                                         pending = list(zip([rxn for rxn, _ in pending], async_results))

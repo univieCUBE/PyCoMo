@@ -28,7 +28,7 @@ logger.info('Multiprocess Logger initialized.')
 configuration = Configuration()
 
 
-def _init_fva_worker(model: "Model", ko_candidate_ids: list, status_queue=None, logger_conf=None) -> None:
+def _init_fva_worker(model: "Model", ko_candidate_ids: list, status_queue=None) -> None:
     """
     Initialize a global model object and corresponding variables for multiprocessing.
 
@@ -48,9 +48,6 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, status_queue=None, 
     _f_rxn_set = set(get_f_reactions(_model))
     _exchg_rxn_set = set(_model.exchanges)
     _ll_candidates = set(_model.reactions.get_by_any(ko_candidate_ids))
-    # if logger_conf is not None:
-    #     configure_logger(logger_conf[1], logger_conf[2], with_name=logger_conf[0])
-    #     logger = get_logger(logger_conf[0])
     if _status_queue is not None:
         _status_queue.put({"verbosity": "debug",
                           "pid": pid,
@@ -346,7 +343,7 @@ def loopless_fva(pycomo_model,
                 with SpawnProcessPool(
                         processes,
                         initializer=_init_fva_worker,
-                        initargs=(pycomo_model.model, ko_candidate_ids, status_queue, get_logger_conf()),
+                        initargs=(pycomo_model.model, ko_candidate_ids, status_queue),
                 ) as pool:
                     statuses = {}
                     async_results = [pool.apply_async(_loopless_fva_step, args=(r,)) for r in reaction_ids]
@@ -601,7 +598,7 @@ def fva(pycomo_model,
                 with SpawnProcessPool(
                         processes,
                         initializer=_init_fva_worker,
-                        initargs=(pycomo_model.model, [], status_queue, get_logger_conf()),
+                        initargs=(pycomo_model.model, [], status_queue),
                 ) as pool:
                     statuses = {}
                     async_results = [pool.apply_async(_fva_step, args=(r,)) for r in reaction_ids]
