@@ -564,7 +564,7 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
 
     return metabolites_without_overlap
 
-def get_metabolites_without_elements_from_model(model):
+def get_metabolites_without_elements_from_model(model, exclude_compartments=["fraction_reaction"], exclude_metabolites=[]):
     """
     Retrieves all metabolites without elements in a model. This is important for assessing mass balance - 
     without elements in metabolites, mass balance cannot be calculated.
@@ -572,8 +572,15 @@ def get_metabolites_without_elements_from_model(model):
     :param model: The model to check
     :return: A list of metabolites without elements
     """
+    exclude_compartments = set(exclude_compartments)
+    exclude_metabolites = set(exclude_metabolites)
+
     metabolites_without_elements = []
     for met in model.metabolites:
+        if met in exclude_metabolites:
+            continue
+        if met.compartment in exclude_compartments:
+            continue
         if not check_element_presence_in_metabolite(met):
             metabolites_without_elements.append(met)
     return metabolites_without_elements

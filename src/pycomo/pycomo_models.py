@@ -1019,7 +1019,11 @@ class CommunityModel:
 
         :return: A list of metabolites without elements
         """
-        return get_metabolites_without_elements_from_model(self.model)
+        return get_metabolites_without_elements_from_model(
+            self.model,
+            exclude_compartments=["fraction_reaction"],
+            exclude_metabolites=self.get_biomass_metabolites()
+            )
 
 
     def is_mass_balanced(self):
@@ -1060,6 +1064,15 @@ class CommunityModel:
         return solution_df[
             (~ solution_df["min_flux"].apply(close_to_zero)) | (~ solution_df["max_flux"].apply(close_to_zero))]
 
+
+    def get_biomass_metabolites(self):
+        biomass_mets = []
+        for member in self.get_member_names():
+            biomass_rxn = self.model.reactions.get_by_id(f"{member}_to_community_biomass")
+            biomass_mets += list(biomass_rxn.metabolites.keys())
+        return list(set(biomass_mets))
+
+    
     def get_member_name_of_reaction(self, reaction):
         """
         This function will return the name of the member the reaction belongs to by extracting this information from its
