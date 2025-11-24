@@ -1,5 +1,5 @@
 __author__ = 'Michael Predl, Marianne Mießkes'
-__version__ = "0.2.8"
+from ._version import __version__
 
 
 from .pycomo_models import (

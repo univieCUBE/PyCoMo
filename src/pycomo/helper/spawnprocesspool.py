@@ -6,10 +6,11 @@ from tempfile import mkstemp
 from multiprocessing import get_context, Pool
 from cobra.util.process_pool import ProcessPool, _init_win_worker
 from typing import Any, Callable, Optional, Tuple, Type
+from pycomo.helper.logger import get_logger_name
 import logging
 
-logger = logging.getLogger("pycomo")
-logger.info('Process Pool Logger initialized.')
+logger = logging.getLogger(get_logger_name())
+logger.debug('Process Pool Logger initialized.')
 
 
 __all__ = ("SpawnProcessPool",)

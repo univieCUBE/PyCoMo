@@ -6,7 +6,7 @@ import warnings
 __description__ = 'A package for generating community metabolic models from single species/strain models.'
 __author__ = 'Michael Predl, Marianne Mießkes'
 __license__ = "MIT"
-__version__ = "0.2.8"
+from pycomo import __version__
 
 
 def parse_fva_flux(value):
@@ -104,6 +104,9 @@ def create_arg_parser():
 
     pg_output.add_argument('--loopless', type=bool, default=True,
                            help="run FVA with loop correction (on by default)")
+    
+    pg_output.add_argument('--precompute-loops', type=bool, default=False,
+                           help="precompute loop reactions for loopless FVA. Reduces runtime for communities of <10 member, and can lead to numerical issues with GLP solver on larger communities (off by default)")
 
     pg_output.add_argument('--fraction-of-optimum', type=float,
                            help="set the fraction of optimum that needs to be achieved. Values need to be between 0 "

@@ -8,11 +8,16 @@ import re
 import numpy as np
 from pycomo.helper.spawnprocesspool import SpawnProcessPool
 import multiprocessing
+import queue as _queue  # for Queue.Empty when draining status queue
 from cobra.core import Configuration
+import time
+import traceback
 import logging
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
+from pycomo.helper.logger import configure_logger, get_logger_conf, get_logger_name, get_logger
 
-logger = logging.getLogger("pycomo")
-logger.info('Utils Logger initialized.')
+logger = logging.getLogger(get_logger_name())
+logger.debug('Utils Logger initialized.')
 
 configuration = Configuration()
 
@@ -393,10 +398,11 @@ def check_mass_balance_of_metabolites_with_identical_id(model_1, model_2):
     unbalanced_metabolites = []
 
     for met_id in set(exchg_mets_1) & set(exchg_mets_2):
-        equal_mass = check_metabolite_equal_mass(exchg_mets_1[met_id], exchg_mets_2[met_id])
+        exchg_met1 = exchg_mets_1[met_id]
+        exchg_met2 = exchg_mets_2[met_id]
+        equal_mass = check_metabolite_equal_mass(exchg_met1, exchg_met2)
         if not equal_mass:
             unbalanced_metabolites.append(met_id)
-
     return unbalanced_metabolites
 
 
@@ -558,6 +564,38 @@ def check_annotation_overlap_of_metabolites_with_identical_id(model_1, model_2):
 
     return metabolites_without_overlap
 
+def get_metabolites_without_elements_from_model(model, exclude_compartments=["fraction_reaction"], exclude_metabolites=[]):
+    """
+    Retrieves all metabolites without elements in a model. This is important for assessing mass balance - 
+    without elements in metabolites, mass balance cannot be calculated.
+
+    :param model: The model to check
+    :return: A list of metabolites without elements
+    """
+    exclude_compartments = set(exclude_compartments)
+    exclude_metabolites = set(exclude_metabolites)
+
+    metabolites_without_elements = []
+    for met in model.metabolites:
+        if met in exclude_metabolites:
+            continue
+        if met.compartment in exclude_compartments:
+            continue
+        if not check_element_presence_in_metabolite(met):
+            metabolites_without_elements.append(met)
+    return metabolites_without_elements
+
+
+def check_element_presence_in_metabolite(met):
+    """
+    Checks if elements are present in a metabolite. This is important for assessing mass balance - 
+    without elements in metabolites, mass balance cannot be calculated.
+
+    :param met: The metabolite to check
+    :return: True if elements are present, otherwise False
+    """
+    return len(met.elements) > 0
+
 
 def check_mass_balance_fomula_safe(model):
     """
@@ -612,41 +650,162 @@ def relax_reaction_constraints_for_zero_flux(model):
             reaction.upper_bound = 0.
 
 
-def _init_loop_worker(model):
+def _init_loop_worker(model, status_queue=None):
     """
-    Initialize a global model object for multiprocessing.
+    Initialize a global model object for multiprocessing and attach a QueueHandler
+    so that worker logging goes into the provided multiprocessing queue.
 
     :param model: The model to perform find loops in
+    :param status_queue: The multiprocessing queue to send log and status messages to the main process
     """
 
     global _model
+    global _status_queue
+    global logger
     _model = model
+    _status_queue = status_queue
+    pid = os.getpid()
+
+    if _status_queue is not None:
+        _status_queue.put({"verbosity": "debug",
+                          "pid": pid,
+                          "status": f"Worker {pid} initialized.", 
+                          "timestamp": time.time(), 
+                          "target": None})
+    else:
+        logger.debug(f"Worker {pid} initialized.")
 
 
-def _find_loop_step(rxn_id):
-    rxn = _model.reactions.get_by_id(rxn_id)
-    _model.objective = rxn.id
-    solution = _model.optimize("minimize")
-    min_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-    solution = _model.optimize("maximize")
-    max_flux = solution.objective_value if not solution.status == "infeasible" else 0.
-    return rxn_id, max_flux, min_flux
+def log_call_by_verbosity(verbosity):
+    """
+    Function to log a message with specified verbosity.
+
+    :param verbosity: Log level (info, warning, error, debug)
+    :return: Logger function of specified level
+    """
+    if verbosity.lower() == "info":
+        return logger.info
+    if verbosity.lower() == "warning":
+        return logger.warning
+    if verbosity.lower() == "error":
+        return logger.error
+    if verbosity.lower() == "debug":
+        return logger.debug
+    return logger.debug
 
 
-def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
+def log_or_queue_message(verbosity, status, target=None):
+    """
+    Handle decision of logging a message or writing it to the status queue. If a status queue is present, the function
+    writes to the queue, otherwise to the logger.
+
+    :param verbosity: Log level
+    :param status: The message to be written
+    :param target: For fva steps only, set the current reaction, defaults to None
+    """
+    pid = os.getpid()
+    if _status_queue is not None:
+        _status_queue.put({"verbosity": verbosity, "pid": pid, "status": status, "timestamp": time.time(), "target": target})
+    else:
+        log_call_by_verbosity(verbosity)(status)
+
+
+def _find_loop_step(rxn_id, check_feasibility=False):
+    """
+    Check if the target reaction is part of a thermodynamically infeasible loop.
+
+    :param rxn_id: The target reaction
+    :param check_feasibility: If set, the presence of a loop is determined by setting a non-zero flux as 
+        bound and checking if the problem is still feasible, defaults to False
+    :return: A tuple of reaction ID, maximum flux, minimum flux
+    """
+    try:
+        pid = os.getpid()
+        log_or_queue_message(verbosity="debug", status=f"Starting find_loop_step for {rxn_id}", target=rxn_id)
+        rxn = _model.reactions.get_by_id(rxn_id)
+        _model.objective = rxn.id
+        t = 10 * cobra.Configuration().tolerance 
+        log_or_queue_message(verbosity="status", status=f"Minimize {rxn_id}", target=rxn_id)
+
+        if check_feasibility:
+            with _model as temp_model:
+                rxn = temp_model.reactions.get_by_id(rxn_id)
+                if rxn.lower_bound > -t:
+                    min_flux = 0.
+                else:
+                    rxn.upper_bound = -t
+                    temp_model.objective = 0
+                    temp_model.slim_optimize()
+                    if temp_model.solver.status == "infeasible":
+                        min_flux = 0.
+                    elif temp_model.solver.status == "optimal":
+                        min_flux = -1.
+                    else:
+                        log_or_queue_message(verbosity="warning", status=f"{pid}: Finished minimize {rxn_id} with status {solution.status}", target=rxn_id)
+                        min_flux = float("nan")            
+        else:
+            solution = _model.optimize("minimize")
+            #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+            if solution.status != "optimal":
+                log_or_queue_message(verbosity="warning", status=f"{pid}: Finished minimize {rxn_id} with status {solution.status}", target=rxn_id)
+            min_flux = solution.objective_value if not solution.status == "infeasible" else float("nan")
+
+        log_or_queue_message(verbosity="status", status=f"Maximize {rxn_id}", target=rxn_id)
+        
+        if check_feasibility:
+            with _model as temp_model:
+                rxn = temp_model.reactions.get_by_id(rxn_id)
+                if rxn.upper_bound < t:
+                    max_flux = 0.
+                else:
+                    rxn.lower_bound = t
+                    temp_model.objective = 0
+                    temp_model.slim_optimize()
+                    if temp_model.solver.status == "infeasible":
+                        max_flux = 0.
+                    elif temp_model.solver.status == "optimal":
+                        max_flux = 1.
+                    else:
+                        max_flux = float("nan")
+                        log_or_queue_message(verbosity="warning", status=f"{pid}: Finished maximize {rxn_id} with status {solution.status}", target=rxn_id)
+                             
+        else:
+            solution = _model.optimize("maximize")
+            #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
+            if solution.status != "optimal":
+                log_or_queue_message(verbosity="warning", status=f"{pid}: Finished maximize {rxn_id} with status {solution.status}", target=rxn_id)
+            max_flux = solution.objective_value if not solution.status == "infeasible" else float("nan")
+
+        log_or_queue_message(verbosity="status", status=f"Finished {rxn_id}", target=rxn_id)
+
+        return rxn_id, max_flux, min_flux
+    except Exception as e:
+        log_or_queue_message(verbosity="error", status=f"Error at {rxn_id}", target=rxn_id)
+        return f"{pid}: Error: {e}\n{traceback.format_exc()}"
+
+
+def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max_time_out=None, restart_on_stall=False):
     """
     This function finds thermodynamically infeasible cycles in models. This is accomplished by setting the medium to
     contain nothing and relax all constraints to allow a flux of 0. Then, FVA is run on all reactions.
 
     :param model: Model to be searched for thermodynamically infeasible cycles
     :param processes: The number of processes to use
+    :param time_out: The time in seconds to wait for a result (default=30)
+    :param max_time_out: The maximum time in seconds to wait for a result (default=None)
+    :param restart_on_stall: If set True, the process pool restarts all unfinished jobs and increases the time_out (up to a max_time_out). Default is False
     :return: A dataframe of reactions and their flux range, if they can carry non-zero flux without metabolite input
     """
     loop_model = model.copy()
     loop_model.medium = {}
     relax_reaction_constraints_for_zero_flux(loop_model)
     loops = []
-    reaction_ids = [r.id for r in loop_model.reactions]
+    if reactions is None:
+        reaction_ids = [r.id for r in loop_model.reactions]
+    else:
+        reaction_ids = [r if isinstance(r, str) else r.id for r in reactions]
+
+    max_time_out = max(time_out * 2, len(loop_model.reactions)*0.5)
 
     num_rxns = len(reaction_ids)
 
@@ -656,69 +815,156 @@ def find_loops_in_model(model, processes=None, time_out=30, max_time_out=300):
     processes = min(processes, num_rxns)
     processed_rxns = 0
 
-    if processes > 1:
-        chunk_size = len(reaction_ids) // processes
-        time_out_step = min(100, int((max_time_out-time_out)/2.))
-        failed_tasks = []
-        
-        with SpawnProcessPool(
+    ctx = multiprocessing.get_context("spawn")
+    manager = ctx.Manager()
+    status_queue = manager.Queue()       
+
+    try:
+        if processes > 1:
+            time_out_step = min(100, int((max_time_out-time_out)/2.))
+            if time_out_step < 1: time_out_step = 1
+            
+            pool = SpawnProcessPool(
                 processes,
                 initializer=_init_loop_worker,
-                initargs=(tuple([loop_model])),
-        ) as pool:
-            async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
-            for input_rxn, res in zip(reaction_ids, async_results):
-                try:
-                    res_tuple = res.get(timeout=time_out)
-                    rxn_id, max_flux, min_flux = res_tuple
-                    processed_rxns += 1
-                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                    if min_flux != 0. or max_flux != 0.:
-                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
-                except multiprocessing.TimeoutError:
-                    logger.warning(f"Find loops step timed out for rxn {input_rxn}")
-                    failed_tasks.append(input_rxn)
-            if failed_tasks:
-                time_out += time_out_step
-                time_out = min(max_time_out, time_out)
-                logger.info(f"Repeating failed find loops steps for reactions: {failed_tasks}")
-                while failed_tasks and time_out <= max_time_out:
-                    repeat_failed_tasks = []
-                    async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in failed_tasks]
-                    for input_rxn, res in zip(failed_tasks, async_results):
+                initargs=(tuple([loop_model, status_queue])),
+            )
+            try:
+                async_results = [pool.apply_async(_find_loop_step, args=(r,)) for r in reaction_ids]
+                pending = list(zip(reaction_ids, async_results))
+                last_processed = processed_rxns
+
+                rounds_since_last_result = 0
+                # local dict to hold latest status per worker pid
+                statuses = {}
+                last_restart_at = 0
+
+                while pending:
+                    # drain status_queue (non-blocking) to update local statuses immediately
+                    try:
+                        while True:
+                            msg = status_queue.get_nowait()
+                            statuses[msg["pid"]] = msg
+                            if msg["verbosity"] in ["info", "debug", "warning", "error"]:
+                                if msg["verbosity"] == "debug":
+                                    logger.debug(f"worker {msg['pid']}: {msg['status']}")
+                                if msg["verbosity"] == "info":
+                                    logger.info(f"worker {msg['pid']}: {msg['status']}")
+                                if msg["verbosity"] == "warning":
+                                    logger.warning(f"worker {msg['pid']}: {msg['status']}")
+                                if msg["verbosity"] == "error":
+                                    logger.error(f"worker {msg['pid']}: {msg['status']}")
+                    except _queue.Empty:
+                        pass
+
+                    found_result = False
+
+                    for i, (input_rxn, res) in enumerate(pending):
                         try:
-                            res_tuple = res.get(timeout=time_out)
+                            res_tuple = res.get(timeout=0.00001)  # Short timeout
                             rxn_id, max_flux, min_flux = res_tuple
                             processed_rxns += 1
-                            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
+                            rounds_since_last_result = 0
+                            if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
                                 logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                                for pid, info in statuses.items():
+                                    logger.debug(f"Worker {pid}: {info}")
                             if min_flux != 0. or max_flux != 0.:
                                 loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                            pending.pop(i)
+                            found_result = True
+                            break  # Only process one result per loop
                         except multiprocessing.TimeoutError:
-                            logger.warning(f"FVA step timed out again for rxn {input_rxn}")
-                            repeat_failed_tasks.append(input_rxn)
-                    failed_tasks = repeat_failed_tasks
-                    time_out += time_out_step
-                logger.error(f"Find loops failed for several reactions:\n{failed_tasks}")
-                # Single core fallback
-                logger.info(f"Running single core FVA fallback for reactions {failed_tasks}")
-                for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
-                    processed_rxns += 1
-                    if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                        logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-                    if min_flux != 0. or max_flux != 0.:
-                        loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
-    else:
-        _init_loop_worker(loop_model)
-        for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
-            processed_rxns += 1
-            if processed_rxns % 10 == 0 or processed_rxns == len(reaction_ids):
-                logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
-            if min_flux != 0. or max_flux != 0.:
-                loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+                            continue
+                    if not found_result:
+                        rounds_since_last_result += 1
+                        # No new result, display status queue
+                        logger.debug(f"No new results, current worker status: {statuses}")
+                        if len(statuses) == 0:
+                            logger.debug("No workers active - trying again")
+                        else:
+                            # check for stalled workers
+                            stalled_pids = [pid for pid, info in statuses.items() if time.time() - info["timestamp"] > time_out]
+                            if stalled_pids:
+                                logger.warning(f"Detected stalled worker(s): {stalled_pids} (no update for >{time_out}s)")
+                                if restart_on_stall:
+                                    logger.info("Restarting worker pool due to stalled workers.")
+                                    # terminate current pool and recreate it
+                                    try:
+                                        pool.terminate()
+                                    except Exception as exc:
+                                        logger.warning(f"Exception when terminating pool: {exc}")
+                                    try:
+                                        pool.join()
+                                    except Exception:
+                                        logger.warning(f"Exception when joining pool: {exc}")
+                                    # rebuild pool and re-submit pending tasks
+                                    try:
+                                        pool = SpawnProcessPool(
+                                            processes,
+                                            initializer=_init_loop_worker,
+                                            initargs=(tuple([loop_model, status_queue])),
+                                        )
+                                        async_results = [pool.apply_async(_find_loop_step, args=(rxn,)) for rxn, _ in pending]
+                                        pending = list(zip([rxn for rxn, _ in pending], async_results))
+                                        statuses.clear()
+                                        rounds_since_last_result = 0
+                                        # continue loop with fresh pool
+
+                                        time_out += time_out_step
+                                        time_out = min(max_time_out, time_out)
+                                        continue
+                                    except Exception as exc:
+                                        logger.error(f"Failed to recreate worker pool: {exc}")
+                                        raise exc
+                                    
+                        time.sleep(min(2*rounds_since_last_result, time_out))  # Wait before next check
+
+                logger.info(f"While pending closed!")
+
+            finally:
+                # ensure pool is cleaned up
+                try:
+                    pool.terminate()
+                except Exception as exc:
+                    logger.warning(f"Exception when terminating pool: {exc}")
+                try:
+                    pool.join()
+                except Exception:
+                    logger.warning(f"Exception when joining pool: {exc}")
+        else:
+            logger.info(f"Running find loops in single core mode")
+            _init_loop_worker(loop_model)
+            for rxn_id, max_flux, min_flux in map(_find_loop_step, reaction_ids):
+                processed_rxns += 1
+                if processed_rxns % 100 == 0 or processed_rxns == len(reaction_ids):
+                    logger.info(f"Processed {round((float(processed_rxns) / num_rxns) * 100, 2)}% of find loops steps")
+                if min_flux != 0. or max_flux != 0.:
+                    loops.append({"reaction": rxn_id, "min_flux": min_flux, "max_flux": max_flux})
+    finally:
+
+        try:
+            for p in multiprocessing.active_children():
+                try:
+                    p.terminate()
+                    p.join(timeout=0.1)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Stopping active child processes raised an exception: {e}")
+
+
+        logger.debug(f"Shutting down queue manager")
+        try:
+            # Manager.shutdown() will stop the manager process and its queues
+            manager.shutdown()
+        except Exception as e:
+            #logger.warning(f"Manager raised exception during shutdown: {e}")
+            pass
+
 
     loops_df = pd.DataFrame(loops, columns=["reaction", "min_flux", "max_flux"])
+    logger.info("Loop detection finished")
     return loops_df
 
 

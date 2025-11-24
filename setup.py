@@ -1,11 +1,17 @@
 from setuptools import find_packages, setup
+import os
 
 with open("README.md", "r") as f:
     long_description = f.read()
 
+here = os.path.abspath(os.path.dirname(__file__))
+about = {}
+with open(os.path.join(here, "src", "pycomo", "_version.py")) as f:
+    exec(f.read(), about)
+
 setup(
     name="pycomo",
-    version="0.2.8",
+    version=about["__version__"],
     description="PyCoMo is a software package for generating and analysing compartmentalized community metabolic models",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
