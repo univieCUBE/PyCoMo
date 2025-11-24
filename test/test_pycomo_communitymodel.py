@@ -20,7 +20,7 @@ def test_run_fva_mu_c():
     toy_model = pycomo.CommunityModel.load(community_input)
     toy_model.convert_to_fixed_growth_rate(0.02)
     original_mu_c = toy_model.mu_c
-    solution = toy_model.run_fva(fva_mu_c=target_mu_c)
+    solution = toy_model.run_fva(fva_mu_c=target_mu_c, reactions=["community_biomass"])
     biomass_flux = solution.loc["community_biomass", :]
 
     # Check results of mu_c with model in fixed growth mode
@@ -33,7 +33,7 @@ def test_run_fva_mu_c():
     # Check results of mu_c with model in fixed abundance mode
     toy_model = pycomo.CommunityModel.load(community_input)
     toy_model.convert_to_fixed_abundance()
-    solution = toy_model.run_fva(fva_mu_c=target_mu_c)
+    solution = toy_model.run_fva(fva_mu_c=target_mu_c, reactions=["community_biomass"])
     biomass_flux = solution.loc["community_biomass", :]
     assert biomass_flux["min_flux"] == target_mu_c
     assert biomass_flux["max_flux"] == target_mu_c
@@ -76,9 +76,7 @@ def test_community_model_boundary_biomass_rxn():
 
 def test_community_model_special_rxn_getters():
     transfer_sol = {'m1_TF_a_m1_external',
-                    'm1_to_community_biomass',
-                    'm2_TF_a_m2_external',
-                    'm2_to_community_biomass'}
+                    'm2_TF_a_m2_external'}
     transport_sol = {'m1_TP_a', 'm1_bio', 'm2_TP_a', 'm2_bio'}
     f_rxn_sol = {'SK_m1_TF_a_m1_external_lb',
                  'SK_m1_TF_a_m1_external_ub',
@@ -91,7 +89,8 @@ def test_community_model_special_rxn_getters():
                  'SK_m2_bio_ub',
                  'SK_m2_to_community_biomass_ub',
                  'm1_fraction_reaction',
-                 'm2_fraction_reaction'}
+                 'm2_fraction_reaction',
+                 'f_final'}
     model = dummy_model()
     model.objective = "bio"
     com_model = pycomo.CommunityModel(models=[

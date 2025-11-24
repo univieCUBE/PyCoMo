@@ -79,7 +79,8 @@ async def test_fva_worker_timeout_handling(caplog):
                                 reactions=model.model.reactions,
                                 processes=2,
                                 time_out=0.1,
-                                max_time_out=0.2)  # Ensure multiprocessing is used
+                                max_time_out=0.2,
+                                restart_on_timeout=True)  # Ensure multiprocessing is used
 
         # Check if the timeout warning was logged
         with open("test/data/output/multiprocess.log", "r") as log_file:
@@ -112,7 +113,8 @@ async def test_fva_worker_timeout_repetition():
                                 reactions=model.model.reactions,
                                 processes=2,
                                 time_out=0.1,
-                                max_time_out=1.)
+                                max_time_out=1.,
+                                restart_on_timeout=True)
 
         # Check if the timeout warning was logged
         with open("test/data/output/multiprocess.log", "r") as log_file:
