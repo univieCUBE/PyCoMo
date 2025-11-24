@@ -1832,9 +1832,8 @@ class CommunityModel:
         :param loopless: Avoids loops in the solutions, but takes longer to compute
         :param fva_mu_c: Set a temporary community growth rate for the community metabolic model
         :param only_exchange_reactions: Analyse only reactions connected to metabolites in the shared exchange
-            compartment
-        :param reactions: A list of reactions that should be analysed. This parameter is overwritten if
-            only_exchange_reactions is set to True
+            compartment. This parameter is overwritten if a list of reactions is given in the reactions parameter.
+        :param reactions: A list of reactions that should be analysed. 
         :param verbose: Print progress of loopless FVA
         :param processes: The number of processes to use
         :return: A dataframe of reaction flux solution ranges. Contains the columns reaction_id, min_flux and max_flux
@@ -1863,12 +1862,20 @@ class CommunityModel:
             logger.debug("Setting fraction_of_optimum to 1")
             fraction_of_optimum = 1.
 
-        if only_exchange_reactions:
+        if reactions:
+            if only_exchange_reactions:
+                logger.warning(f"FVA function started with only_exchange_reactions parameter active, and a list of target reactions. Both cannot be satisfied at the same time, the target reaction list is used instead of the only_exchange_reactions parameter.")
+            log_call("Setting reactions to be analysed to target reaction list")
+            if isinstance(reactions[0], str):
+                reactions = [model.reactions.get_by_id(r) for r in reactions]
+        
+        elif only_exchange_reactions:
             log_call("Setting reactions to be analysed to exchange reactions only")
             biomass_met = model.metabolites.get_by_id(f"cpd11416_{self.shared_compartment_name}")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]) and biomass_met not in x.metabolites.keys())
             print(reactions)
+        
         elif reactions is None:
             log_call("Setting reactions to be analysed to all non-fraction-reactions")
             reactions = model.reactions.query(lambda x: x not in self.f_reactions)
