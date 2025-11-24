@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from cobra import Model
 
 logger = logging.getLogger(get_logger_name())
-logger.info('Multiprocess Logger initialized.')
+logger.debug('Multiprocess Logger initialized.')
 
 configuration = Configuration()
 

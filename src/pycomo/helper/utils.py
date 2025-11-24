@@ -17,7 +17,7 @@ from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pycomo.helper.logger import configure_logger, get_logger_conf, get_logger_name, get_logger
 
 logger = logging.getLogger(get_logger_name())
-logger.info('Utils Logger initialized.')
+logger.debug('Utils Logger initialized.')
 
 configuration = Configuration()
 

@@ -10,7 +10,7 @@ logging.captureWarnings(True)
 # module globals to track the active configured logger
 _logger = None
 _logger_name = None
-log_level = logging.DEBUG
+log_level = logging.INFO
 log_file_name = None
 
 
