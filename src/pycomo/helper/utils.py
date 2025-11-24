@@ -656,7 +656,7 @@ def _init_loop_worker(model, status_queue=None):
     so that worker logging goes into the provided multiprocessing queue.
 
     :param model: The model to perform find loops in
-    :param log_queue: multiprocessing.Queue used to transport LogRecords to main process
+    :param status_queue: The multiprocessing queue to send log and status messages to the main process
     """
 
     global _model
@@ -675,7 +675,14 @@ def _init_loop_worker(model, status_queue=None):
     else:
         logger.debug(f"Worker {pid} initialized.")
 
+
 def log_call_by_verbosity(verbosity):
+    """
+    Function to log a message with specified verbosity.
+
+    :param verbosity: Log level (info, warning, error, debug)
+    :return: Logger function of specified level
+    """
     if verbosity.lower() == "info":
         return logger.info
     if verbosity.lower() == "warning":
@@ -688,6 +695,14 @@ def log_call_by_verbosity(verbosity):
 
 
 def log_or_queue_message(verbosity, status, target=None):
+    """
+    Handle decision of logging a message or writing it to the status queue. If a status queue is present, the function
+    writes to the queue, otherwise to the logger.
+
+    :param verbosity: Log level
+    :param status: The message to be written
+    :param target: For fva steps only, set the current reaction, defaults to None
+    """
     pid = os.getpid()
     if _status_queue is not None:
         _status_queue.put({"verbosity": verbosity, "pid": pid, "status": status, "timestamp": time.time(), "target": target})
@@ -696,6 +711,14 @@ def log_or_queue_message(verbosity, status, target=None):
 
 
 def _find_loop_step(rxn_id, check_feasibility=False):
+    """
+    Check if the target reaction is part of a thermodynamically infeasible loop.
+
+    :param rxn_id: The target reaction
+    :param check_feasibility: If set, the presence of a loop is determined by setting a non-zero flux as 
+        bound and checking if the problem is still feasible, defaults to False
+    :return: A tuple of reaction ID, maximum flux, minimum flux
+    """
     try:
         pid = os.getpid()
         log_or_queue_message(verbosity="debug", status=f"Starting find_loop_step for {rxn_id}", target=rxn_id)
@@ -768,6 +791,9 @@ def find_loops_in_model(model, reactions=None, processes=None, time_out=300, max
 
     :param model: Model to be searched for thermodynamically infeasible cycles
     :param processes: The number of processes to use
+    :param time_out: The time in seconds to wait for a result (default=30)
+    :param max_time_out: The maximum time in seconds to wait for a result (default=None)
+    :param restart_on_stall: If set True, the process pool restarts all unfinished jobs and increases the time_out (up to a max_time_out). Default is False
     :return: A dataframe of reactions and their flux range, if they can carry non-zero flux without metabolite input
     """
     loop_model = model.copy()

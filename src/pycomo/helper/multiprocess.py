@@ -34,6 +34,7 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, status_queue=None) 
 
     :param model: The model to perform FVA on
     :param ko_candidate_ids: The list of candidates for loop removal
+    :param status_queue: The multiprocessing queue to send log and status messages to the main process
     """
     s_time = time.time()
     global _model
@@ -58,6 +59,12 @@ def _init_fva_worker(model: "Model", ko_candidate_ids: list, status_queue=None) 
 
 
 def log_call_by_verbosity(verbosity):
+    """
+    Function to log a message with specified verbosity.
+
+    :param verbosity: Log level (info, warning, error, debug)
+    :return: Logger function of specified level
+    """
     if verbosity.lower() == "info":
         return logger.info
     if verbosity.lower() == "warning":
@@ -70,6 +77,14 @@ def log_call_by_verbosity(verbosity):
 
 
 def log_or_queue_message(verbosity, status, target=None):
+    """
+    Handle decision of logging a message or writing it to the status queue. If a status queue is present, the function
+    writes to the queue, otherwise to the logger.
+
+    :param verbosity: Log level
+    :param status: The message to be written
+    :param target: For fva steps only, set the current reaction, defaults to None
+    """
     pid = os.getpid()
     if _status_queue is not None:
         _status_queue.put({"verbosity": verbosity, "pid": pid, "status": status, "timestamp": time.time(), "target": target})
@@ -256,6 +271,9 @@ def loopless_fva(pycomo_model,
     :param ko_candidate_ids: Reactions to be constrained and used in the objective (as set of reaction ids)
     :param verbose: Prints progress messages
     :param processes: The number of processes to use for the calculation
+    :param time_out: The time in seconds to wait for a result (default=30)
+    :param max_time_out: The maximum time in seconds to wait for a result (default=300)
+    :param restart_on_timeout: If set True, the process pool restarts all unfinished jobs and increases the time_out (up to a max_time_out). Default is False
     :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
         reaction IDs
     """
@@ -518,6 +536,9 @@ def fva(pycomo_model,
     :param ko_candidate_ids: Reactions to be constrained and used in the objective (as set of reaction ids)
     :param verbose: Prints progress messages
     :param processes: The number of processes to use for the calculation
+    :param time_out: The time in seconds to wait for a result (default=30)
+    :param max_time_out: The maximum time in seconds to wait for a result (default=300)
+    :param restart_on_timeout: If set True, the process pool restarts all unfinished jobs and increases the time_out (up to a max_time_out). Default is False
     :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
         reaction IDs
     """

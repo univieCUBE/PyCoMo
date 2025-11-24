@@ -917,6 +917,16 @@ class CommunityModel:
         self.apply_medium()
 
     def is_transporter(self, rxn):
+        """
+        Check if a reaction is a transport reaction. A transport reaction is here defined as a reaction which has metabolites 
+        in two different model compartments (which is assumed to allow metabolic interaction across membranes).
+        Further restrictions are: the reaction is not part of the pseudo-reactions used for bound scaling. The reaction
+        is also part of a community member and not only the shared outside. Lastly, the reaction has metabolites in 
+        two different compartments, excluding the pseudo-metabolite compartment fraction_reaction.
+
+        :param rxn: The reaction to check (as cobra reaction object)
+        :return: True if the reaction is a transporter, else False
+        """
         if rxn in self.f_reactions:
             # Fraction reactions are not transporters
             return False
@@ -1066,6 +1076,12 @@ class CommunityModel:
 
 
     def get_biomass_metabolites(self):
+        """
+        Get the biomass metabolites of each community member. Specifically, this function searches for the metabolites
+        that are converted into the community biomass through the reactions [member]_to_community_biomass.
+
+        :return: A list of biomass metabolites (as cobra metabolite objects)
+        """
         biomass_mets = []
         for member in self.get_member_names():
             biomass_rxn = self.model.reactions.get_by_id(f"{member}_to_community_biomass")
@@ -1812,6 +1828,23 @@ class CommunityModel:
                      ko_candidate_ids=None,
                      verbose=False,
                      processes=None):
+        """
+        Performs flux variability analysis and removes futile cycles from the solutions. This is
+        achieved by fixing the direction of reactions as found in the solution, fixing the fluxes of exchange reactions
+        and minimizing the remaining flux values. This approach is adapted from
+        `CycleFreeFLux <https://doi.org/10.1093/bioinformatics/btv096>`_ and its implementation in COBRApy.
+
+        :param pycomo_model: A pycomo community metabolic model
+        :param reactions: A list of reactions that should be analysed
+        :param fraction_of_optimum: The fraction of the optimal objective flux that needs to be reached
+        :param use_loop_reactions_for_ko: Find loops in the model and use these reactions as ko_candidates. Overwrites
+            value in ko_candidates
+        :param ko_candidate_ids: Reactions to be constrained and used in the objective (as set of reaction ids)
+        :param verbose: Prints progress messages
+        :param processes: The number of processes to use for the calculation
+        :return: A dataframe of reaction flux solution ranges. Contains the columns minimum and maximum with index of
+            reaction IDs
+        """
         return loopless_fva(self,
                             reaction_ids,
                             fraction_of_optimum=fraction_of_optimum,
