@@ -16,6 +16,7 @@ import logging
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from .logger import configure_logger, get_logger_conf, get_logger_name, get_logger
 from .utils import get_f_reactions, find_incoherent_bounds, relax_reaction_constraints_for_zero_flux
+from .efmtool_interface import run_efmtool_with_custom_model
 
 logger = logging.getLogger(get_logger_name())
 logger.debug('CycleBreaker Logger initialized.')
@@ -69,3 +70,8 @@ def remove_blocked_reactions(model):
     model.remove_reactions(blocked_rxns, remove_orphans=True)
     logger.debug(f"{len(blocked_rxns)} blocked reactions removed")
     return model
+
+def enumerate_cycles_in_com_model(com_model):
+    model = prepare_model_for_cycle_enumeration(com_model)
+    cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
+    return cycles
