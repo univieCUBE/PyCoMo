@@ -1746,6 +1746,58 @@ class CommunityModel:
         logger.debug("Metabolites removed")
 
         return model
+    
+    def convert_to_model_without_fraction_metabolites_by_copy(self):
+        """
+        Converts the community metabolic model into an equal model, without dummy metabolites and reactions. This
+        process essentially reverses the equivalent, bound free model structure applied to the models of the community
+        members.
+
+        :return: An equal model, without dummy metabolites and reactions
+        """
+        logger.debug("Generating model without fraction metabolites")
+        was_fixed_growth = False
+        if self.fixed_growth_rate_flag:
+            was_fixed_growth = True
+            self.convert_to_fixed_abundance()
+
+
+        # Make a new model to populate
+        model = cobra.Model()
+
+        logger.debug("Copying reactions to new model")
+        # Get all reactions to be copied (i.e. not fraction reactions)
+        target_rxns = list(set(self.model.reactions) - set(self.f_reactions))
+
+        for r in target_rxns:
+            model.add_reactions([r.copy()])
+
+        logger.debug("Adjusting reaction bounds in new model")
+        # Adjust reaction bounds in new model (and remove bound metabolites)
+        for reaction in [self.model.reactions.get_by_id(n + "_fraction_reaction") for n in self.get_member_names()]:
+            for metabolite, coeff in reaction.metabolites.items():
+                if "_lb" == metabolite.id[-3:]:
+                    rxn = model.reactions.get_by_id(metabolite.id[:-3])
+                    rxn.lower_bound = -coeff / self._dummy_metabolite_scaling_factor
+                    met = model.metabolites.get_by_id(metabolite.id)
+                    met.remove_from_model(False)
+                elif "_ub" == metabolite.id[-3:]:
+                    rxn = model.reactions.get_by_id(metabolite.id[:-3])
+                    rxn.upper_bound = coeff / self._dummy_metabolite_scaling_factor
+                    met = model.metabolites.get_by_id(metabolite.id)
+                    met.remove_from_model(False)
+                elif "_f_biomass_met" in metabolite.id:
+                    rxn = model.reactions.get_by_id(
+                        metabolite.id.split("_f_biomass_met")[0] + "_to_community_biomass")
+                    met = model.metabolites.get_by_id(metabolite.id)
+                    met.remove_from_model(False)
+        
+
+        if was_fixed_growth:
+            self.convert_to_fixed_growth_rate()
+
+        logger.debug("Model without fraction metabolites generated.")
+        return model
 
     def load_medium_from_file(self, file_path):
         """
