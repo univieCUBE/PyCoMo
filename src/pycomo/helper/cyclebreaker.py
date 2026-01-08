@@ -50,6 +50,9 @@ def prepare_model_for_cycle_enumeration(com_model):
     else:
         com_model.convert_to_fixed_abundance()
 
+    # Remove the medium
+    model.medium = {}
+
     # Remove demand constraints (non-zero flux enforced)
     relax_reaction_constraints_for_zero_flux(model)
 
