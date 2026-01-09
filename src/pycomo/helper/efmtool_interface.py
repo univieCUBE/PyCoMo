@@ -150,7 +150,7 @@ def run_efmtool_with_custom_model(custom_model, ref_com_model, mu=0.):
     try:
         custom_model.reactions.remove("abundance_reaction")  # remove reaction for fixing composition
     except ValueError:
-        print("No abundance reaction found")
+        logger.debug("No abundance reaction found")
     # IDs of abundance reactions and transport reactions
     organism_ids = ref_com_model.get_member_names()
     ecfms = run_efmtool(*community_matrix_sbml(custom_model, organism_ids, mu))
