@@ -78,3 +78,89 @@ def enumerate_cycles_in_com_model(com_model):
     model = prepare_model_for_cycle_enumeration(com_model)
     cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
     return cycles
+
+def add_cycle_breaker_constraint(com_model, cycle):
+    """
+    Adds a sum constraint for a given cycle. The constraint specifies, that the reactions of this cycle cannot be active at the same time.
+    This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
+    than the number of reactions in the cycle (thus at least one is inactive).
+
+    :param com_model: The model to add the constraint
+    :param cycle: The cycle to form the constraint for. A dictionairy of reaction ids and flux values.
+    """
+    if not isinstance(cycle, dict):
+        cycle = dict(cycle)
+
+    bigM = 1000
+    eps = com_model.model.tolerance
+
+    cb_vars = []
+
+    for rxn_id, val in cycle.items():
+        rxn = com_model.model.reactions.get_by_id(rxn_id)
+        if val > 0.:
+            # binary variable
+            var_name = f"cb_{rxn.id}_fwd"
+            if var_name in com_model.model.variables:
+                y_fwd = com_model.model.variables[var_name]
+            else:
+                y_fwd = com_model.model.solver.interface.Variable(var_name, type="binary")
+                com_model.model.solver.add([y_fwd])
+                c_fwd1 = com_model.model.solver.interface.Constraint(rxn.flux_expression - bigM * y_fwd, ub=0, name=f"{var_name}_ub")
+                c_fwd2 = com_model.model.solver.interface.Constraint(rxn.flux_expression - eps * y_fwd, lb=0, name=f"{var_name}_lb")
+                com_model.model.solver.add([c_fwd1, c_fwd2])
+            cb_vars.append(y_fwd)
+            
+        elif val < 0.:
+            # binary variable
+            var_name = f"cb_{rxn.id}_rev"
+            if var_name in com_model.model.variables:
+                y_rev = com_model.model.variables[var_name]
+            else:
+                y_rev = com_model.model.solver.interface.Variable(var_name, type="binary")
+                com_model.model.solver.add([y_rev])
+                c_rev1 = com_model.model.solver.interface.Constraint(rxn.flux_expression + bigM * y_rev, lb=0, name=f"{var_name}_lb")
+                c_rev2 = com_model.model.solver.interface.Constraint(rxn.flux_expression + eps * y_rev, ub=0, name=f"{var_name}_ub")
+                com_model.model.solver.add([c_rev1, c_rev2])
+            cb_vars.append(y_rev)
+
+    
+    # Add cycle constraint
+    n = len(cb_vars)
+
+    cycle_constraint_name = get_free_cycle_constraint_name(com_model)
+        
+    if int(cycle_constraint_name.split("cb_cycle_")[1]) % 1000 == 0:
+        logger.debug(f"Adding constraint {cycle_constraint_name}")
+    c_cycle_break = com_model.model.solver.interface.Constraint(sum(cb_vars), ub=n-1, name=cycle_constraint_name)
+    
+    com_model.model.solver.add([c_cycle_break])
+
+def get_free_cycle_constraint_name(com_model):
+    """
+    Create a name for cycle constraints in the form of cb_cycle_[number] with [number] 
+    being the lowest integer where this name is not yet in the model constraints.
+
+    :param com_model: Community model where the constraint should be added
+    :return: A name that is not yet used in the model
+    """
+    free_cycle_name = "cb_cycle_1"
+    i = 1
+
+    while free_cycle_name in com_model.model.solver.constraints:
+        i += 1
+        free_cycle_name = f"cb_cycle_{i}"
+    
+    return free_cycle_name
+
+def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df):
+    """
+    Adds sum constraint for all cycles in the dataframe. The constraints specify, that the reactions of a cycle cannot be active at the same time.
+    This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
+    than the number of reactions in the cycle (thus at least one is inactive).
+
+    :param com_model: The model to add the constraints
+    :param cycle_df: A dataframe of reaction ids (columns) and cycles (rows) with corresponding flux values as cell values
+    """
+    for _, row in cycle_df.iterrows():
+        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row))
