@@ -42,6 +42,7 @@ def prepare_model_for_cycle_enumeration(com_model):
         com_model.convert_to_fixed_growth_rate(mu_c=0.)
     
     # Remove fraction metabolites
+    logger.debug("Creating model without fraction metabolites or reactions")
     model = com_model.convert_to_model_without_fraction_metabolites_by_copy()
 
     # Revert changes to community model
@@ -56,6 +57,7 @@ def prepare_model_for_cycle_enumeration(com_model):
     # Remove demand constraints (non-zero flux enforced)
     relax_reaction_constraints_for_zero_flux(model)
 
+    logger.debug("Removing blocked reactions")
     model = remove_blocked_reactions(model)
 
     return model
@@ -76,6 +78,7 @@ def remove_blocked_reactions(model):
 
 def enumerate_cycles_in_com_model(com_model):
     model = prepare_model_for_cycle_enumeration(com_model)
+    logger.debug("Running efmtool for cycle detection")
     cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
     return cycles
 
