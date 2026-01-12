@@ -109,9 +109,10 @@ def add_cycle_breaker_constraint(com_model, cycle, eps=None, no_enforce_activity
                 y_fwd = com_model.model.solver.interface.Variable(var_name, type="binary")
                 com_model.model.solver.add([y_fwd])
                 c_fwd1 = com_model.model.solver.interface.Constraint(rxn.flux_expression - bigM * y_fwd, ub=0, name=f"{var_name}_ub")
+                com_model.model.solver.add([c_fwd1])
                 if not no_enforce_activity_constraint:
                     c_fwd2 = com_model.model.solver.interface.Constraint(rxn.flux_expression - eps * y_fwd, lb=0, name=f"{var_name}_lb")
-                com_model.model.solver.add([c_fwd1, c_fwd2])
+                    com_model.model.solver.add([c_fwd2])
             cb_vars.append(y_fwd)
             
         elif val < 0.:
@@ -123,9 +124,10 @@ def add_cycle_breaker_constraint(com_model, cycle, eps=None, no_enforce_activity
                 y_rev = com_model.model.solver.interface.Variable(var_name, type="binary")
                 com_model.model.solver.add([y_rev])
                 c_rev1 = com_model.model.solver.interface.Constraint(rxn.flux_expression + bigM * y_rev, lb=0, name=f"{var_name}_lb")
+                com_model.model.solver.add([c_rev1])
                 if not no_enforce_activity_constraint:
                     c_rev2 = com_model.model.solver.interface.Constraint(rxn.flux_expression + eps * y_rev, ub=0, name=f"{var_name}_ub")
-                com_model.model.solver.add([c_rev1, c_rev2])
+                    com_model.model.solver.add([c_rev2])
             cb_vars.append(y_rev)
 
     
