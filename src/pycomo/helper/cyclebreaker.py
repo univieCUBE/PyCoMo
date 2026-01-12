@@ -79,7 +79,7 @@ def enumerate_cycles_in_com_model(com_model):
     cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
     return cycles
 
-def add_cycle_breaker_constraint(com_model, cycle, eps=None):
+def add_cycle_breaker_constraint(com_model, cycle, eps=None, no_enforce_activity_constraint=True):
     """
     Adds a sum constraint for a given cycle. The constraint specifies, that the reactions of this cycle cannot be active at the same time.
     This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
@@ -109,7 +109,8 @@ def add_cycle_breaker_constraint(com_model, cycle, eps=None):
                 y_fwd = com_model.model.solver.interface.Variable(var_name, type="binary")
                 com_model.model.solver.add([y_fwd])
                 c_fwd1 = com_model.model.solver.interface.Constraint(rxn.flux_expression - bigM * y_fwd, ub=0, name=f"{var_name}_ub")
-                c_fwd2 = com_model.model.solver.interface.Constraint(rxn.flux_expression - eps * y_fwd, lb=0, name=f"{var_name}_lb")
+                if not no_enforce_activity_constraint:
+                    c_fwd2 = com_model.model.solver.interface.Constraint(rxn.flux_expression - eps * y_fwd, lb=0, name=f"{var_name}_lb")
                 com_model.model.solver.add([c_fwd1, c_fwd2])
             cb_vars.append(y_fwd)
             
@@ -122,7 +123,8 @@ def add_cycle_breaker_constraint(com_model, cycle, eps=None):
                 y_rev = com_model.model.solver.interface.Variable(var_name, type="binary")
                 com_model.model.solver.add([y_rev])
                 c_rev1 = com_model.model.solver.interface.Constraint(rxn.flux_expression + bigM * y_rev, lb=0, name=f"{var_name}_lb")
-                c_rev2 = com_model.model.solver.interface.Constraint(rxn.flux_expression + eps * y_rev, ub=0, name=f"{var_name}_ub")
+                if not no_enforce_activity_constraint:
+                    c_rev2 = com_model.model.solver.interface.Constraint(rxn.flux_expression + eps * y_rev, ub=0, name=f"{var_name}_ub")
                 com_model.model.solver.add([c_rev1, c_rev2])
             cb_vars.append(y_rev)
 
@@ -155,7 +157,7 @@ def get_free_cycle_constraint_name(com_model):
     
     return free_cycle_name
 
-def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df, eps=None):
+def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df, eps=None, no_enforce_activity_constraint=True):
     """
     Adds sum constraint for all cycles in the dataframe. The constraints specify, that the reactions of a cycle cannot be active at the same time.
     This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
@@ -166,4 +168,4 @@ def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df, eps=None):
     :param eps: A small, greater than 0 threshold, above which the reaction is considered active (default is solver tolerance)
     """
     for _, row in cycle_df.iterrows():
-        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row), eps=eps)
+        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row), eps=eps, no_enforce_activity_constraint=no_enforce_activity_constraint)
