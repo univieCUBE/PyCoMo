@@ -79,7 +79,7 @@ def enumerate_cycles_in_com_model(com_model):
     cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
     return cycles
 
-def add_cycle_breaker_constraint(com_model, cycle):
+def add_cycle_breaker_constraint(com_model, cycle, eps=None):
     """
     Adds a sum constraint for a given cycle. The constraint specifies, that the reactions of this cycle cannot be active at the same time.
     This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
@@ -87,12 +87,14 @@ def add_cycle_breaker_constraint(com_model, cycle):
 
     :param com_model: The model to add the constraint
     :param cycle: The cycle to form the constraint for. A dictionairy of reaction ids and flux values.
+    :param eps: A small, greater than 0 threshold, above which the reaction is considered active (default is solver tolerance)
     """
     if not isinstance(cycle, dict):
         cycle = dict(cycle)
 
     bigM = 1000
-    eps = com_model.model.tolerance
+    if eps is None:
+        eps = com_model.model.tolerance
 
     cb_vars = []
 
@@ -153,7 +155,7 @@ def get_free_cycle_constraint_name(com_model):
     
     return free_cycle_name
 
-def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df):
+def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df, eps=None):
     """
     Adds sum constraint for all cycles in the dataframe. The constraints specify, that the reactions of a cycle cannot be active at the same time.
     This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
@@ -161,6 +163,7 @@ def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df):
 
     :param com_model: The model to add the constraints
     :param cycle_df: A dataframe of reaction ids (columns) and cycles (rows) with corresponding flux values as cell values
+    :param eps: A small, greater than 0 threshold, above which the reaction is considered active (default is solver tolerance)
     """
     for _, row in cycle_df.iterrows():
-        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row))
+        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row), eps=eps)
