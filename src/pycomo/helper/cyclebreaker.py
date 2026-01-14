@@ -82,7 +82,7 @@ def enumerate_cycles_in_com_model(com_model):
     cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
     return cycles
 
-def add_cycle_breaker_constraint(com_model, cycle, eps=None, no_enforce_activity_constraint=True):
+def add_cycle_breaker_constraint(com_model, cycle, eps=None, no_enforce_activity_constraint=True, name=None):
     """
     Adds a sum constraint for a given cycle. The constraint specifies, that the reactions of this cycle cannot be active at the same time.
     This is implemented by binary variables for reaction activity. The constraint is set so the sum of these binary variables must be lower 
@@ -137,7 +137,10 @@ def add_cycle_breaker_constraint(com_model, cycle, eps=None, no_enforce_activity
     # Add cycle constraint
     n = len(cb_vars)
 
-    cycle_constraint_name = get_free_cycle_constraint_name(com_model)
+    if name is None:
+        cycle_constraint_name = get_free_cycle_constraint_name(com_model)
+    else:
+        cycle_constraint_name = name
         
     if int(cycle_constraint_name.split("cb_cycle_")[1]) % 1000 == 0:
         logger.debug(f"Adding constraint {cycle_constraint_name}")
@@ -162,6 +165,23 @@ def get_free_cycle_constraint_name(com_model):
     
     return free_cycle_name
 
+def get_free_cycle_constraint_base_name(com_model, basename="cb_cycle"):
+    """
+    Create a name for cycle constraints in the form of cb_cycle_[number] with [number] 
+    being the lowest integer where this name is not yet in the model constraints.
+
+    :param com_model: Community model where the constraint should be added
+    :return: A name that is not yet used in the model
+    """
+    free_cycle_name = f"{basename}_1"
+    i = 1
+
+    while free_cycle_name in com_model.model.solver.constraints:
+        i += 1
+        free_cycle_name = f"{basename}{i}_1"
+    
+    return free_cycle_name
+
 def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df, eps=None, no_enforce_activity_constraint=True):
     """
     Adds sum constraint for all cycles in the dataframe. The constraints specify, that the reactions of a cycle cannot be active at the same time.
@@ -172,5 +192,9 @@ def add_cycle_breaker_constraints_for_all_cycles(com_model, cycle_df, eps=None, 
     :param cycle_df: A dataframe of reaction ids (columns) and cycles (rows) with corresponding flux values as cell values
     :param eps: A small, greater than 0 threshold, above which the reaction is considered active (default is solver tolerance)
     """
+    cycle_basename = get_free_cycle_constraint_base_name(com_model)
+    i = 0
     for _, row in cycle_df.iterrows():
-        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row), eps=eps, no_enforce_activity_constraint=no_enforce_activity_constraint)
+        i += 1  # Start at 1
+        cons_name = f"{cycle_basename}_{i}"
+        add_cycle_breaker_constraint(com_model=com_model, cycle=dict(row), eps=eps, no_enforce_activity_constraint=no_enforce_activity_constraint, name=cons_name)
