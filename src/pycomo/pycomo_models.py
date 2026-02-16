@@ -1351,8 +1351,8 @@ class CommunityModel:
                     constrained_mets[met_lb] = coefficient
                     fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
                     reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor})
-                if self.inf_bound_if_greater is not None and reaction.lower_bound >= self.inf_bound_if_greater:
-                    reaction.lower_bound = np.inf
+                if self.inf_bound_if_greater is not None and reaction.upper_bound >= self.inf_bound_if_greater:
+                    reaction.upper_bound = np.inf
                 if reaction.upper_bound != 0 and not np.isinf(reaction.upper_bound):
                     coefficient = self.max_flux if reaction.upper_bound > self.max_flux else reaction.upper_bound
                     constrained_mets[met_ub] = coefficient
