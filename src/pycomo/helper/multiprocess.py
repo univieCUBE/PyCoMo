@@ -211,7 +211,7 @@ def _loopless_fva_step(rxn_id):
 
 
         _model.objective = rxn.id
-        solution = _model.optimize("minimize")
+        solution = _model.optimize("minimize", raise_error=False)
         log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on min is {solution.status}", target=rxn_id)
 
         if not solution.status == "infeasible":
@@ -220,13 +220,13 @@ def _loopless_fva_step(rxn_id):
                 with _model:
                     _add_loopless_constraints_and_objective(solution.fluxes)
                     log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimize for loopless flux", target=rxn_id)
-                    solution = _model.optimize()
+                    solution = _model.optimize(raise_error=False)
                     log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimization for loopless flux finished", target=rxn_id)
             min_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
             log_or_queue_message(verbosity="warning", status=f"{rxn.id} min flux is infeasible", target=rxn_id)
             min_flux = float("nan")
-        solution = _model.optimize("maximize")
+        solution = _model.optimize("maximize", raise_error=False)
         log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on max is {solution.status}", target=rxn_id)
         if not solution.status == "infeasible":
             if perform_loopless_on_rxn:
@@ -234,7 +234,7 @@ def _loopless_fva_step(rxn_id):
                 with _model:
                     _add_loopless_constraints_and_objective(solution.fluxes)
                     log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimize for loopless flux", target=rxn_id)
-                    solution = _model.optimize()
+                    solution = _model.optimize(raise_error=False)
                     log_or_queue_message(verbosity="debug", status=f"{rxn.id} Optimization for loopless flux finished", target=rxn_id)
             max_flux = solution.fluxes[rxn.id] if not solution.status == "infeasible" else 0.
         else:
@@ -493,7 +493,7 @@ def _fva_step(rxn_id):
 
         _model.objective = rxn.id
         log_or_queue_message(verbosity="debug", status=f"Running minimize for rxn {rxn_id}", target=rxn_id)
-        solution = _model.optimize("minimize")
+        solution = _model.optimize("minimize", raise_error=False)
         log_or_queue_message(verbosity="debug", status=f"Running minimize finished for rxn {rxn_id}", target=rxn_id)
         log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on min is {solution.status}", target=rxn_id)
         if not solution.status == "infeasible":
@@ -502,7 +502,7 @@ def _fva_step(rxn_id):
             log_or_queue_message(verbosity="warning", status=f"{rxn.id} min flux is infeasible", target=rxn_id)
             min_flux = float("nan")
         log_or_queue_message(verbosity="debug", status=f"Running maximize for rxn {rxn_id}", target=rxn_id)
-        solution = _model.optimize("maximize")
+        solution = _model.optimize("maximize", raise_error=False)
         log_or_queue_message(verbosity="debug", status=f"Running maximize finished for rxn {rxn_id}", target=rxn_id)
         log_or_queue_message(verbosity="debug", status=f"{rxn.id} solver status on max is {solution.status}", target=rxn_id)
         if not solution.status == "infeasible":
