@@ -718,8 +718,9 @@ class CommunityModel:
         if not inf_bound_if_greater is None:
             if not inf_bound_if_greater > 0.:
                 raise ValueError(f"Parameter inf_bound_if_greater must be either None or a float greater than 0. Provided {inf_bound_if_greater}")
+        self.inf_bound_if_greater = inf_bound_if_greater
 
-        if inf_bound_if_greater is not None:
+        if self.inf_bound_if_greater is not None:
             logger.info(f"Setting maximum flux value to infinite")
             self.max_flux = np.inf
         elif max_flux > 0.:
@@ -1343,14 +1344,14 @@ class CommunityModel:
                 met_ub = cobra.Metabolite(f'{reaction.id}_ub', name=f'{reaction.id} upper bound',
                                           compartment='fraction_reaction')
                 # add constrained metabolites to the constrained_mets dictionary
-                if reaction.lower_bound <= -self.inf_bound_if_greater:
+                if self.inf_bound_if_greater is not None and reaction.lower_bound <= -self.inf_bound_if_greater:
                     reaction.lower_bound = -np.inf
                 if reaction.lower_bound != 0 and not np.isinf(reaction.lower_bound):
                     coefficient = -self.max_flux if reaction.lower_bound < -self.max_flux else reaction.lower_bound
                     constrained_mets[met_lb] = coefficient
                     fraction_reaction_mets[met_lb] = -coefficient * self._dummy_metabolite_scaling_factor
                     reaction.add_metabolites({met_lb: self._dummy_metabolite_scaling_factor})
-                if reaction.lower_bound >= self.inf_bound_if_greater:
+                if self.inf_bound_if_greater is not None and reaction.lower_bound >= self.inf_bound_if_greater:
                     reaction.lower_bound = np.inf
                 if reaction.upper_bound != 0 and not np.isinf(reaction.upper_bound):
                     coefficient = self.max_flux if reaction.upper_bound > self.max_flux else reaction.upper_bound
@@ -1389,10 +1390,10 @@ class CommunityModel:
         # Is reaction part of a community member?
         member_name = self.get_member_name_of_reaction(reaction)
 
-        if lower_bound <= -self.inf_bound_if_greater:
+        if self.inf_bound_if_greater is not None and lower_bound <= -self.inf_bound_if_greater:
             logger.warning(f"Trying to set lower bound to a value, that should be treated as -inf. Setting to -inf instead.")
             lower_bound = -np.inf
-        if upper_bound >= self.inf_bound_if_greater:
+        if self.inf_bound_if_greater is not None and upper_bound >= self.inf_bound_if_greater:
             logger.warning(f"Trying to set upper bound to a value, that should be treated as inf. Setting to inf instead.")
             upper_bound = np.inf
 
