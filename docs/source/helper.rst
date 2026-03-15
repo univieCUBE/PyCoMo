@@ -9,5 +9,8 @@ Helper Modules
    cli
    multiprocess
    spawnprocesspool
+   discretized_growth
+   efmtool_interface
+   cyclebreaker
 
 

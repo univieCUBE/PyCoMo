@@ -30,6 +30,8 @@ Michael Predl, Marianne Mießkes, Thomas Rattei, Jürgen Zanghellini, PyCoMo: a 
 
    max_growth_rate_tutorial
    loopless_fva_tutorial
+   discretized_growth_tutorial
+   cyclebreaker_tutorial
 
 
 .. toctree::

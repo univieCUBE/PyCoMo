@@ -31,3 +31,13 @@ Next run pip install on the folder containing the PyCoMo repository.
 .. code-block:: bash
     
     pip install path/to/PyCoMo
+
+Installation with optional dependencies for EFM enumeration / CycleBreaker
+------------------------------
+Install PyCoMo via pip with the efm flag:
+
+.. code-block:: bash
+
+    pip install pycomo[efm]
+
+or install efmtool manually.
