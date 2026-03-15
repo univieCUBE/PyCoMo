@@ -246,7 +246,6 @@ def discretize_growth_of_model(com_model, f_vars, mu_lb=0., mu_ub=1000., n_mu_bi
     biomass_rxn = com_model.model.reactions.community_biomass
     member_names = com_model.get_member_names()
     k_vars = init_mu_variables(com_model.model, biomass_rxn, mu_lb=mu_lb, mu_ub=mu_ub, n_mu_bins=n_mu_bins)
-    print(k_vars)
     for m in member_names: 
         discretize_growth(
             model=com_model.model, 
