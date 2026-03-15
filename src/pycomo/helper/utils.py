@@ -744,7 +744,7 @@ def _find_loop_step(rxn_id, check_feasibility=False):
                         log_or_queue_message(verbosity="warning", status=f"{pid}: Finished minimize {rxn_id} with status {solution.status}", target=rxn_id)
                         min_flux = float("nan")            
         else:
-            solution = _model.optimize("minimize")
+            solution = _model.optimize("minimize", raise_error=False)
             #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
             if solution.status != "optimal":
                 log_or_queue_message(verbosity="warning", status=f"{pid}: Finished minimize {rxn_id} with status {solution.status}", target=rxn_id)
@@ -770,7 +770,7 @@ def _find_loop_step(rxn_id, check_feasibility=False):
                         log_or_queue_message(verbosity="warning", status=f"{pid}: Finished maximize {rxn_id} with status {solution.status}", target=rxn_id)
                              
         else:
-            solution = _model.optimize("maximize")
+            solution = _model.optimize("maximize", raise_error=False)
             #logger.debug(f"{pid}: Finished minimize {rxn_id} with status {solution.status}")
             if solution.status != "optimal":
                 log_or_queue_message(verbosity="warning", status=f"{pid}: Finished maximize {rxn_id} with status {solution.status}", target=rxn_id)

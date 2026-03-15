@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycomo"
-version = "0.2.9"
+version = "0.3.0"
 description = "PyCoMo is a software package for generating and analysing compartmentalized community metabolic models"
 license = {file = "LICENSE"}
 authors = [
     {name = "Michael Predl", email = "michael.predl@univie.ac.at"},
-    {name = "Marianne Mießkes", email = "marianne.miesskes@univie.ac.at"}
+    {name = "Marianne Mießkes", email = "marianne.miesskes@univie.ac.at"},
+    {name = "Juergen Zanghellini", email = "juergen.zanghellini@univie.ac.at"}
 ]
 maintainers = [
     {name = "Michael Predl", email = "michael.predl@univie.ac.at"},
-    {name = "Marianne Mießkes", email = "marianne.miesskes@univie.ac.at"}
 ]
 readme = "README.md"
 classifiers=[
@@ -25,8 +25,15 @@ dependencies = [
     "cobra >= 0.23.0",
     "pandas >= 1.5.3",
     "python-libsbml >= 5.20.1",
-    "numpy >= 1.22.4"
+    "numpy >= 1.22.4",
+    "sympy"
 ]
+
+[project.optional-dependencies]
+
+efm = ["efmtool"]
+
+
 
 [project.urls]
 repository = "https://github.com/univieCUBE/PyCoMo"
