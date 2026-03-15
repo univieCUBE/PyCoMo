@@ -2,7 +2,6 @@
 This module provides an interface for efmtool
 """
 import pandas as pd
-import efmtool
 import cobra
 import os
 import re
@@ -35,7 +34,11 @@ def run_efmtool(matrix, rxn_names, met_names, revs=[]):
     Returns:
         pandas data frame with EFMs as rows and reactions as columns
     """
-
+    try:
+        import efmtool
+    except ImportError:
+        raise ImportError("Optional dependency 'efmtool' is required for EFM enumeration. "
+                          "Install it with pip install pycomo[efm]")
     options = efmtool.get_default_options()
     options["arithmetic"] = "fractional"
     options['level'] = 'WARNING'

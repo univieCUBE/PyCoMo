@@ -77,6 +77,11 @@ def remove_blocked_reactions(model):
     return model
 
 def enumerate_cycles_in_com_model(com_model):
+    try:
+        import efmtool
+    except ImportError:
+        raise ImportError("Optional dependency 'efmtool' is required for EFM enumeration. "
+                          "Install it with pip install pycomo[efm]")
     model = prepare_model_for_cycle_enumeration(com_model)
     logger.debug("Running efmtool for cycle detection")
     cycles = run_efmtool_with_custom_model(custom_model=model, ref_com_model=com_model, mu=0.)
