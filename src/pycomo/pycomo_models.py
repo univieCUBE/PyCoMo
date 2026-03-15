@@ -1991,7 +1991,6 @@ class CommunityModel:
             biomass_met = model.metabolites.get_by_id(f"cpd11416_{self.shared_compartment_name}")
             reactions = model.reactions.query(lambda x: any([met.compartment == self.shared_compartment_name
                                                              for met in x.metabolites.keys()]) and biomass_met not in x.metabolites.keys())
-            print(reactions)
         
         elif reactions is None:
             log_call("Setting reactions to be analysed to all non-fraction-reactions")
