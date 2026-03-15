@@ -33,8 +33,6 @@ setup(
     install_requires=["cobra >= 0.23.0", "pandas >= 1.5.3", "python-libsbml >= 5.20.1", "numpy >= 1.22.4"],
     extra_require={
         "dev": ["pytest >= 7.0", "twine >= 4.0.2"],
-    },
-    extra_require={
         "efm": ["efmtool"],
     },
     python_requires=">=3.9",
