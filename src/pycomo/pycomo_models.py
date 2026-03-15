@@ -21,6 +21,7 @@ from .helper.cli import *
 from .helper.multiprocess import *
 from .helper.cyclebreaker import *
 from .helper.efmtool_interface import *
+from .helper.discretized_growth import *
 from pycomo import __version__
 
 logger = logging.getLogger(get_logger_name())
