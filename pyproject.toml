@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 
-milp = ["efmtool"]
+efm = ["efmtool"]
 
 
 
