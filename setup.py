@@ -34,5 +34,8 @@ setup(
     extra_require={
         "dev": ["pytest >= 7.0", "twine >= 4.0.2"],
     },
+    extra_require={
+        "efm": ["efmtool"],
+    },
     python_requires=">=3.9",
 )
